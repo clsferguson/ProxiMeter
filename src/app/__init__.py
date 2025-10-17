@@ -4,9 +4,14 @@ from flask import Flask
 def create_app() -> Flask:
     """Flask application factory.
 
+    - Configures JSON logging
     - Configures static and template folders
     - Registers blueprints
     """
+    # Configure JSON logging first
+    from .logging_config import configure_logging
+    configure_logging()
+
     app = Flask(
         __name__,
         static_folder="static",
