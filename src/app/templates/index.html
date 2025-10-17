@@ -1,51 +1,37 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Hello Counter</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-  </head>
-  <body>
-    <main class="container">
-      <h1>Hello</h1>
-      {% if warning %}
-      <div role="status" class="notice">{{ warning }}</div>
-      {% endif %}
+{% extends "base.html" %}
 
-      <div class="counter" aria-live="polite">
-        <span id="value">{{ counter }}</span>
-      </div>
+{% block title %}ProxiMeter - RTSP Stream Manager{% endblock %}
 
-      <button id="inc" class="btn" aria-label="Increment counter" title="Increment counter">
-        Increment
-      </button>
+{% block content %}
+<main class="container">
+  <!-- Header with animation support -->
+  <header class="header" id="main-header">
+    <h1 class="header-title">ProxiMeter</h1>
+  </header>
 
-      <p class="hint">Value persists to config/config.yml</p>
-    </main>
+  <!-- Primary action: Add stream button -->
+  <div class="actions">
+    <a href="/streams/new" class="btn btn-primary" id="add-stream-btn">
+      Add Stream
+    </a>
+  </div>
 
-    <script>
-      const valueEl = document.getElementById('value');
-      const btn = document.getElementById('inc');
-      async function increment() {
-        try {
-          const res = await fetch('/api/counter', { method: 'POST' });
-          if (!res.ok) throw new Error('Request failed');
-          const data = await res.json();
-          valueEl.textContent = data.counter;
-        } catch (e) {
-          console.error(e);
-          // Optionally show a message
-        }
-      }
-      btn.addEventListener('click', increment);
-      // Keyboard accessibility: Enter/Space
-      btn.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          increment();
-        }
-      });
-    </script>
-  </body>
-  </html>
+  <!-- Stream list area (will be populated in Phase 3/4) -->
+  <div class="streams-container" id="streams-list">
+    <!-- Empty state -->
+    <div class="empty-state" id="empty-state">
+      <p>No streams configured yet.</p>
+      <p class="hint">Click "Add Stream" to get started.</p>
+    </div>
+
+    <!-- Stream grid (populated dynamically) -->
+    <div class="streams-grid" id="streams-grid" style="display: none;">
+      <!-- Stream items will be inserted here -->
+    </div>
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/app.js"></script>
+{% endblock %}

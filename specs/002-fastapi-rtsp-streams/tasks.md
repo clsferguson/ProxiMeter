@@ -32,16 +32,16 @@ Notes
 
 ## Phase 2: Foundational
 
-- [ ] T017 Implement YAML read/write with atomic rename in `src/app/config_io.py`
-- [ ] T018 Implement standardized error responses in `src/app/api/errors.py`
-- [ ] T019 Add lightweight rate limiting middleware `src/app/middleware/rate_limit.py`
-- [ ] T020 Wire FastAPI app with routers/middleware in `src/app/wsgi.py` (mount `api/streams`, `api/health`, and UI views; add rate-limit, logging, request-id, and error handlers)
-- [ ] T021 Implement health endpoint handler in `src/app/api/health.py` (return `{ "status": "ok" }`; used by container HEALTHCHECK)
-- [ ] T022 Mount static files and Jinja2 templates in `src/app/wsgi.py`
-- [ ] T023 Remove legacy Flask routes file `src/app/routes.py`
-- [ ] T024 Scaffold landing template (FastAPI version) `src/app/templates/index.html` (basic layout blocks; no grid/animations yet)
-- [ ] T025 [P] Add credential masking helper for rtsp_url `src/app/utils/strings.py`
-- [ ] T026 [P] Add RTSP URL validation utilities `src/app/utils/validation.py`
+- [X] T017 Implement YAML read/write with atomic rename in `src/app/config_io.py`
+- [X] T018 Implement standardized error responses in `src/app/api/errors.py`
+- [X] T019 Add lightweight rate limiting middleware `src/app/middleware/rate_limit.py`
+- [X] T020 Wire FastAPI app with routers/middleware in `src/app/wsgi.py` (mount `api/streams`, `api/health`, and UI views; add rate-limit, logging, request-id, and error handlers)
+- [X] T021 Implement health endpoint handler in `src/app/api/health.py` (return `{ "status": "ok" }`; used by container HEALTHCHECK)
+- [X] T022 Mount static files and Jinja2 templates in `src/app/wsgi.py`
+- [X] T023 Remove legacy Flask routes file `src/app/routes.py`
+- [X] T024 Scaffold landing template (FastAPI version) `src/app/templates/index.html` (basic layout blocks; no grid/animations yet)
+- [X] T025 [P] Add credential masking helper for rtsp_url `src/app/utils/strings.py`
+- [X] T026 [P] Add RTSP URL validation utilities `src/app/utils/validation.py`
 
 ## Phase 3: User Story 1 – Add and View a Stream (P1)
 
