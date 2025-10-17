@@ -47,19 +47,19 @@ Notes
 
 Goal: Add a stream (Name + RTSP URL), navigate to playback capped at ≤5 FPS, header animates to top-left.
 
-- [ ] T027 [US1] Define Pydantic models (Stream, NewStream, EditStream) `src/app/models/stream.py`
-- [ ] T028 [P] [US1] Implement create stream service with validation + 2s probe `src/app/services/streams_service.py`
-- [ ] T029 [P] [US1] Implement `POST /api/streams` route `src/app/api/streams.py`
-- [ ] T030 [US1] Implement MJPEG frame generator (≤5 FPS, no audio) `src/app/utils/rtsp.py`
-- [ ] T031 [US1] Implement `GET /play/{id}.mjpg` playback route `src/app/api/streams.py`
-- [ ] T032 [US1] Implement landing route GET `/` with Add button `src/app/ui/views.py`
-- [ ] T033 [US1] Implement Add form routes GET `/streams/new` and POST submit `src/app/ui/views.py`
-- [ ] T034 [P] [US1] Finalize landing template with centered header, equal-width grid scaffolding `src/app/templates/index.html`
-- [ ] T035 [P] [US1] Add Add Stream form template `src/app/templates/add_stream.html`
-- [ ] T036 [P] [US1] Add playback template with error banner/back link `src/app/templates/play.html`
-- [ ] T037 [US1] Wire header animation class toggle on route change `src/app/static/app.js`
-- [ ] T038 [US1] Mask rtsp_url in API responses; add Cache-Control headers `src/app/api/streams.py`
-- [ ] T039 [US1] Keep metrics stub for playback/creates `src/app/metrics.py`
+- [X] T027 [US1] Define Pydantic models (Stream, NewStream, EditStream) `src/app/models/stream.py`
+- [X] T028 [P] [US1] Implement create stream service with validation + 2s probe `src/app/services/streams_service.py`
+- [X] T029 [P] [US1] Implement `POST /api/streams` route `src/app/api/streams.py`
+- [X] T030 [US1] Implement MJPEG frame generator (≤5 FPS, no audio) `src/app/utils/rtsp.py`
+- [X] T031 [US1] Implement `GET /play/{id}.mjpg` playback route `src/app/api/streams.py`
+- [X] T032 [US1] Implement landing route GET `/` with Add button `src/app/ui/views.py`
+- [X] T033 [US1] Implement Add form routes GET `/streams/new` and POST submit `src/app/ui/views.py`
+- [X] T034 [P] [US1] Finalize landing template with centered header, equal-width grid scaffolding `src/app/templates/index.html`
+- [X] T035 [P] [US1] Add Add Stream form template `src/app/templates/add_stream.html`
+- [X] T036 [P] [US1] Add playback template with error banner/back link `src/app/templates/play.html`
+- [X] T037 [US1] Wire header animation class toggle on route change `src/app/static/app.js`
+- [X] T038 [US1] Mask rtsp_url in API responses; add Cache-Control headers `src/app/api/streams.py`
+- [X] T039 [US1] Keep metrics stub for playback/creates `src/app/metrics.py`
 
 Independent test criteria
 - Add valid RTSP stream; playback starts within 3s (p95) at ≤5 FPS; header animates to top-left; Back returns to landing.

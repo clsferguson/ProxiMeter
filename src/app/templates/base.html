@@ -8,10 +8,16 @@
     {% block extra_head %}{% endblock %}
 </head>
 <body>
+    <!-- Header with animation support -->
+    <header class="header {% block header_class %}header-landing{% endblock %}" id="app-header">
+        <h1 class="header-title">ProxiMeter</h1>
+    </header>
+    
     {% block body %}
     {% block content %}{% endblock %}
     {% endblock %}
     
+    <script src="/static/app.js"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

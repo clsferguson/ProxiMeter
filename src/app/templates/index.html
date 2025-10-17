@@ -2,13 +2,10 @@
 
 {% block title %}ProxiMeter - RTSP Stream Manager{% endblock %}
 
+{% block header_class %}header-landing{% endblock %}
+
 {% block content %}
 <main class="container">
-  <!-- Header with animation support -->
-  <header class="header" id="main-header">
-    <h1 class="header-title">ProxiMeter</h1>
-  </header>
-
   <!-- Primary action: Add stream button -->
   <div class="actions">
     <a href="/streams/new" class="btn btn-primary" id="add-stream-btn">
@@ -16,22 +13,44 @@
     </a>
   </div>
 
-  <!-- Stream list area (will be populated in Phase 3/4) -->
+  <!-- Stream list area -->
   <div class="streams-container" id="streams-list">
-    <!-- Empty state -->
-    <div class="empty-state" id="empty-state">
-      <p>No streams configured yet.</p>
-      <p class="hint">Click "Add Stream" to get started.</p>
-    </div>
-
-    <!-- Stream grid (populated dynamically) -->
-    <div class="streams-grid" id="streams-grid" style="display: none;">
-      <!-- Stream items will be inserted here -->
-    </div>
+    {% if streams and streams|length > 0 %}
+      <!-- Stream grid with equal-width buttons -->
+      <div class="stream-grid" id="streams-grid">
+        {% for stream in streams %}
+        <div class="stream-item" data-stream-id="{{ stream.id }}">
+          <a href="/play/{{ stream.id }}" class="stream-button">
+            <div class="stream-name">{{ stream.name }}</div>
+            {% if stream.status == "Inactive" %}
+            <div class="stream-status inactive">⚠ Inactive</div>
+            {% endif %}
+          </a>
+          <div class="stream-actions">
+            <button class="btn-icon drag-handle" title="Drag to reorder" aria-label="Drag to reorder">
+              ☰
+            </button>
+            <a href="/streams/{{ stream.id }}/edit" class="btn-icon" title="Edit stream" aria-label="Edit stream">
+              ✎
+            </a>
+            <button class="btn-icon delete-btn" 
+                    data-stream-id="{{ stream.id }}" 
+                    data-stream-name="{{ stream.name }}"
+                    title="Delete stream" 
+                    aria-label="Delete stream">
+              🗑
+            </button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <!-- Empty state -->
+      <div class="empty-state" id="empty-state">
+        <p>No streams configured yet.</p>
+        <p class="hint">Click "Add Stream" to get started.</p>
+      </div>
+    {% endif %}
   </div>
 </main>
-{% endblock %}
-
-{% block scripts %}
-<script src="/static/app.js"></script>
 {% endblock %}
