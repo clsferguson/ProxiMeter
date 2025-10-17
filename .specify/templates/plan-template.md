@@ -40,6 +40,7 @@
 - GPU backend provisioning is fail-fast (no fallback) and versions emitted
 - Observability: JSON logs, /health, Prometheus metrics present
 - Security: non-root, input validation, CSRF, rate-limits; file I/O restricted
+- Security: non-root, input validation, rate-limits; file I/O restricted; no authentication (LAN-only; DO NOT expose to WAN)
 - CI/build: buildx with --platform=linux/amd64; healthcheck in image
 - CI/build: buildx with --platform=linux/amd64; healthcheck in image
 - CI runners: GitHub-hosted CPU-only; pipeline MUST NOT require GPU devices or drivers

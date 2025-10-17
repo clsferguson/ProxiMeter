@@ -1,22 +1,23 @@
 <!--
 Sync Impact Report
-- Version change: 1.0.0 → 1.1.0
+- Version change: 1.1.0 → 2.0.0
 - Modified principles:
+  - IV. Observability, Security, and Reliability by Default → IV. Observability, Security, and Reliability by Default (no-auth, LAN-only; removed CSRF requirement)
   - V. Testing and CI/CD Integrity → V. Testing and CI/CD Integrity (clarified GPU limits; CI dry-run)
 - Added sections:
   - VI. CPU-only CI Policy (GitHub Runners)
 - Removed sections: None
 - Templates requiring updates:
 	- .specify/templates/plan-template.md ✅ updated (CI on CPU-only runners; optional off-CI GPU tests)
-	- .specify/templates/spec-template.md ✅ updated (FR/SC reflect CI dry-run; GPU tests optional/off-CI)
+	- .specify/templates/spec-template.md ✅ updated (FR/SC reflect CI dry-run; GPU tests optional/off-CI; no-auth LAN-only)
 	- .specify/templates/tasks-template.md ✅ updated (CI dry-run validation task)
 	- .specify/templates/commands/* ⚠ pending (directory absent)
-	- README.md ⚠ pending (document CI_DRY_RUN env and GPU test policy)
+	- README.md ⚠ pending (document CI_DRY_RUN env, GPU test policy, and LAN-only/no-auth posture)
 	- artifacts/versions.md ⚠ pending (create and keep current)
 	- artifacts/decisions.md ⚠ pending (create and record trade-offs, include GPU test policy/limitations)
 - Follow-up TODOs:
 	- Create artifacts/versions.md and artifacts/decisions.md per Tooling policy
-	- Add README with env var matrix, backend support table, MQTT/SSE examples, and CI_DRY_RUN usage
+	- Add README with env var matrix, backend support table, MQTT/SSE examples, CI_DRY_RUN usage, and LAN-only/no-auth warning
 	- Add docker-compose example with platform: linux/amd64 and GPU device exposure
 	- If desired later, define an optional off-CI/manual GPU test runbook or configure a self-hosted GPU runner
 -->
@@ -56,9 +57,12 @@ Structured JSON logging with configurable levels via env is REQUIRED. The app
 MUST expose health and Prometheus metrics, including per-stream FPS, latency,
 queue depth, and GPU utilization when available. Implement graceful shutdown,
 decoder/GPU cleanup, and a watchdog for stuck streams with exponential backoff.
-Security controls include: non-root execution, strict input validation, CSRF
-protection, rate-limiting on sensitive routes, and file I/O restricted to
-`config.yml` in a dedicated volume.
+Security controls include: non-root execution, strict input validation,
+rate-limiting on sensitive routes, and file I/O restricted to `config.yml` in a
+dedicated volume. This application is intended for trusted LAN environments and
+MUST NOT require authentication (no-auth by design); it MUST NOT be exposed to
+the public WAN. Document this posture prominently in README and example
+compose files.
 
 Rationale: Operability and safety in unattended deployments.
 
@@ -124,6 +128,9 @@ GPU guarantees through documented, off-CI validation.
 	shutdown, watchdog auto-reconnect with exponential backoff.
 - Security & hardening: Non-root, input validation, CSRF, rate-limit sensitive
 	routes, restrict file I/O to `config.yml`, disallow arbitrary shell execution.
+	No authentication is provided or required; deployment is LAN-only and MUST NOT
+	be exposed to WAN. Provide README warnings and example compose using
+	LAN-scoped exposure.
 - Docker & CI: Build with buildx and `--platform=linux/amd64`; publish ONLY
 	amd64 images/tags. Provide a docker-compose example with `platform:
 	linux/amd64` and GPU device exposure per backend on amd64 hosts.
@@ -171,8 +178,9 @@ GPU guarantees through documented, off-CI validation.
 	- Docker-only amd64, single-model/multi-stream at 5 FPS cap, and env/config
 		contract are preserved.
 	- GPU backend fail-fast behavior and no fallback are preserved.
-	- Observability (JSON logs, metrics, health) and security controls (CSRF,
-		rate-limit, input validation, non-root) are intact.
+	- Observability (JSON logs, metrics, health) and security controls (rate-limit,
+		input validation, non-root) are intact; no-auth and LAN-only posture is
+		documented; no WAN exposure examples are introduced.
 	- CI enforces linux/amd64-only builds; Dockerfile standards are met.
 	- Tests are updated and passing on CPU-only CI. If optional GPU smoke tests are
 		performed out-of-band, record outcomes; if not available, record the
@@ -180,4 +188,4 @@ GPU guarantees through documented, off-CI validation.
 	- Tooling & Evidence artifacts (`artifacts/versions.md`, `decisions.md`) are
 		maintained and `entrypoint.sh` emits versions.
 
-**Version**: 1.1.0 | **Ratified**: 2025-10-17 | **Last Amended**: 2025-10-17
+**Version**: 2.0.0 | **Ratified**: 2025-10-17 | **Last Amended**: 2025-10-17

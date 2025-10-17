@@ -95,7 +95,7 @@
 - **FR-009**: Persist only /app/config/config.yml; no model caches or artifacts persisted
 - **FR-010**: GPU backend provisioning via entrypoint.sh; fail fast on errors; print versions; support CI dry-run via `CI_DRY_RUN=true` to skip device access on CPU-only runners
 - **FR-011**: Structured JSON logging; Prometheus metrics for FPS, latency, queues, GPU utilization
-- **FR-012**: Security controls: non-root, input validation, CSRF, rate-limits; restrict file I/O
+- **FR-012**: Security controls: non-root, input validation, rate-limits; restrict file I/O; no authentication (LAN-only deployment, MUST NOT be exposed to WAN); warn in README/examples
 - **FR-013**: CI builds and publishes linux/amd64 only images using buildx on GitHub CPU-only runners; CI MUST NOT require GPU devices
 - **FR-016**: Off-CI GPU smoke tests (manual or self-hosted runner) validate device discovery + single-frame inference per supported GPU_BACKEND
 
