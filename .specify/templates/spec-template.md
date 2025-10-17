@@ -88,7 +88,7 @@
 - **FR-002**: Load a single YOLO model specified by YOLO_MODEL and IMAGE_SIZE; export to ONNX on startup
 - **FR-003**: Manage multiple RTSP streams with CRUD via web UI; validate at save
 - **FR-004**: Enforce max 5 FPS per stream using frame skipping/backpressure
-- **FR-005**: Provide Flask-based UI (app factory) and REST APIs via Blueprints
+ - **FR-005**: Provide FastAPI-based application with APIRouter modules for UI and REST APIs; use Jinja2 templating where needed; serve via ASGI (Uvicorn/Gunicorn)
 - **FR-006**: Optional MQTT publishing of per-stream scores with required schema
 - **FR-007**: Optional HTTP score streaming (SSE or WebSocket) at HTTP_STREAM_PATH
 - **FR-008**: Provide GET endpoint for latest score snapshot per stream

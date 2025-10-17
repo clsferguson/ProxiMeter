@@ -1,8 +1,8 @@
 # ProxiMeter — Hello Counter MVP
 
-A minimal Flask web app that shows a Hello page with a persistent counter. Click the button to increment; the value persists to `config/config.yml`.
+A minimal FastAPI web app that shows a Hello page with a persistent counter. Click the button to increment; the value persists to `config/config.yml`.
 
-- Tech: Python 3.12, Flask, Jinja2, PyYAML, Gunicorn
+- Tech: Python 3.12, FastAPI, Uvicorn, Jinja2, PyYAML
 - Endpoints: `/` (UI), `/api/counter` (GET/POST), `/health` (readiness)
 - Notes: Meant for LAN-only demos; no authentication. Do not expose publicly without hardening.
 

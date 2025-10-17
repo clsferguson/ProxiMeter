@@ -46,7 +46,7 @@ description: "Task list template for feature implementation"
 **Purpose**: Project initialization and basic structure
 
 - [ ] T001 Create project structure per implementation plan (src/, tests/, Makefile)
-- [ ] T002 Initialize Python 3.12 project; add Flask, Prometheus, MQTT, ONNX Runtime deps
+- [ ] T002 Initialize Python 3.12 project; add FastAPI, Uvicorn, Prometheus, MQTT, ONNX Runtime deps
 - [ ] T003 [P] Configure ruff/black, mypy; PEP8; pre-commit hooks
 - [ ] T004 Create Dockerfile (multi-stage, python:3.12-slim-trixie, non-root, HEALTHCHECK)
 - [ ] T005 Create docker-compose example with platform: linux/amd64 and GPU device exposure
@@ -63,7 +63,7 @@ description: "Task list template for feature implementation"
 
 Examples of foundational tasks (adjust based on your project):
 
-- [ ] T008 [P] Implement Flask app factory; register Blueprints (ui, api, streams, health, metrics)
+- [ ] T008 [P] Implement FastAPI app; register APIRouter modules (ui, api, streams, health, metrics)
 - [ ] T009 [P] Implement structured JSON logging and error handling
 - [ ] T010 [P] Implement config.yml loader/saver with schema validation
 - [ ] T011 [P] Implement RTSP validator utility and unit tests
@@ -71,8 +71,7 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] T013 [P] Implement entrypoint.sh provisioning for GPU_BACKEND with version checks and fail-fast
 - [ ] T014 [P] Implement ONNX export pipeline for YOLO_MODEL on startup; single-model manager
 - [ ] T015 [P] Implement inference worker scaffolding with frame queue and 5 FPS cap
-- [ ] T016 [P] Implement security middleware: CSRF, rate-limit sensitive routes, input validation
- - [ ] T016 [P] Implement security middleware: rate-limit sensitive routes, input validation; document LAN-only/no-auth posture
+- [ ] T016 [P] Implement security middleware: rate-limit sensitive routes, input validation; document LAN-only/no-auth posture
 - [ ] T017 [P] CI workflow to build amd64-only images via buildx and publish tags (GitHub runners)
 - [ ] T017a [P] Add CI_DRY_RUN=true path to start app without GPU and validate /health on CPU-only CI
 

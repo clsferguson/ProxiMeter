@@ -1,25 +1,24 @@
 <!--
 Sync Impact Report
-- Version change: 1.1.0 → 2.0.0
-- Modified principles:
-  - IV. Observability, Security, and Reliability by Default → IV. Observability, Security, and Reliability by Default (no-auth, LAN-only; removed CSRF requirement)
-  - V. Testing and CI/CD Integrity → V. Testing and CI/CD Integrity (clarified GPU limits; CI dry-run)
-- Added sections:
-  - VI. CPU-only CI Policy (GitHub Runners)
+- Version change: 2.0.0 → 2.1.0
+- Modified sections:
+  - Architecture & Execution Constraints: Web framework updated (Flask → FastAPI)
+  - Persistence & ports: Server wording (Flask → ASGI/Uvicorn)
+  - Tooling & Evidence Requirements: Framework docs (Flask → FastAPI/ASGI)
+- Added sections: None
 - Removed sections: None
 - Templates requiring updates:
-	- .specify/templates/plan-template.md ✅ updated (CI on CPU-only runners; optional off-CI GPU tests)
-	- .specify/templates/spec-template.md ✅ updated (FR/SC reflect CI dry-run; GPU tests optional/off-CI; no-auth LAN-only)
-	- .specify/templates/tasks-template.md ✅ updated (CI dry-run validation task)
+	- .specify/templates/spec-template.md ✅ updated (FR-005 FastAPI/APIRouter)
+	- .specify/templates/tasks-template.md ✅ updated (FastAPI app + APIRouter; removed CSRF line)
+	- .specify/templates/plan-template.md ✅ no Flask references; unchanged
 	- .specify/templates/commands/* ⚠ pending (directory absent)
-	- README.md ⚠ pending (document CI_DRY_RUN env, GPU test policy, and LAN-only/no-auth posture)
+	- README.md ✅ updated (Tech stack and structure)
+	- src/app/* ⚠ pending (migrate Flask app to FastAPI with APIRouter and templates)
 	- artifacts/versions.md ⚠ pending (create and keep current)
-	- artifacts/decisions.md ⚠ pending (create and record trade-offs, include GPU test policy/limitations)
+	- artifacts/decisions.md ⚠ pending (record framework switch rationale and ASGI server choice)
 - Follow-up TODOs:
-	- Create artifacts/versions.md and artifacts/decisions.md per Tooling policy
-	- Add README with env var matrix, backend support table, MQTT/SSE examples, CI_DRY_RUN usage, and LAN-only/no-auth warning
-	- Add docker-compose example with platform: linux/amd64 and GPU device exposure
-	- If desired later, define an optional off-CI/manual GPU test runbook or configure a self-hosted GPU runner
+	- Create artifacts/versions.md and artifacts/decisions.md; record FastAPI adoption and ASGI server choice (Uvicorn/Gunicorn)
+	- Review Dockerfile/compose to ensure ASGI server usage; update if needed
 -->
 
 # Multi-RTSP Person Detection (Docker-only, amd64) Constitution
@@ -109,8 +108,10 @@ GPU guarantees through documented, off-CI validation.
 	loaded at a time.
 - Streams: RTSP CRUD via UI, validated at save; per-stream enable/disable and
 	optional thresholds/zones if provided. Enforce 5 FPS cap with backpressure.
-- Web UI: Flask app factory with Blueprints for UI, REST, stream control,
-	health, and metrics. Dark, responsive UI optimized for mobile/touch.
+- Web API/UI: FastAPI application with APIRouter modules for UI, REST, stream
+	control, health, and metrics. Use Jinja2 templating (fastapi.templating)
+	for server-rendered pages as needed. Dark, responsive UI optimized for
+	mobile/touch.
 - APIs & outputs:
 	- MQTT (optional): If `MQTT_ENABLED=true`, publish numeric score per stream to
 		`MQTT_HOST:MQTT_PORT` under `MQTT_TOPIC` with sensible QoS/retain and
@@ -142,7 +143,8 @@ GPU guarantees through documented, off-CI validation.
 	tests MAY be run (if hardware available) to validate device discovery and a
 	single-frame inference per `GPU_BACKEND`.
 - Persistence & ports: Persist ONLY `/app/config/config.yml`; expose `APP_PORT`
-	for Flask server; document HTTP streaming path and any additional ports used.
+	for the ASGI server (Uvicorn/Gunicorn); document HTTP streaming path and any
+	additional ports used.
 - Developer experience: Provide a Makefile for build, run, test, push; enforce
 	linux/amd64 flags and consistent tagging; include env var matrix and backend
 	support table in README plus Home Assistant examples.
@@ -152,7 +154,7 @@ GPU guarantees through documented, off-CI validation.
 - During planning/implementation, agents MUST use SearXNG web search to resolve 
     latest stable versions and installation guidance for CUDA/TensorRT (NVIDIA),
 	ROCm/MIVisionX (AMD), OpenVINO (Intel), ONNX Runtime, PyTorch/TorchAudio/
-	TorchVision (if used), FFmpeg/GStreamer components, Flask/Docker, or any 
+	TorchVision (if used), FFmpeg/GStreamer components, FastAPI/ASGI & Docker, or any 
     other not mentioned packages best practices.
 - Agents MUST ingest and reference official documentation pages before pinning
 	versions or commands, use the Context7 tool to look up documentation.
@@ -188,4 +190,4 @@ GPU guarantees through documented, off-CI validation.
 	- Tooling & Evidence artifacts (`artifacts/versions.md`, `decisions.md`) are
 		maintained and `entrypoint.sh` emits versions.
 
-**Version**: 2.0.0 | **Ratified**: 2025-10-17 | **Last Amended**: 2025-10-17
+**Version**: 2.1.0 | **Ratified**: 2025-10-17 | **Last Amended**: 2025-10-17
