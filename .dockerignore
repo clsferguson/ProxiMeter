@@ -22,7 +22,6 @@ node_modules/
 tmp/
 .tmp/
 config/*.yml
-!config/config.yml
 *.sw?
 Thumbs.db
 .DS_Store

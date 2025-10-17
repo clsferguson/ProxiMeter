@@ -9,7 +9,8 @@ from typing import Any, Tuple
 import yaml
 
 
-CONFIG_DIR = os.path.join(os.getcwd(), "config")
+# Use environment variable or default to /app/config for container deployment
+CONFIG_DIR = os.environ.get("CONFIG_DIR", "/app/config")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.yml")
 STREAMS_KEY = "streams"
 
