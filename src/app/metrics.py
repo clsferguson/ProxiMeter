@@ -4,12 +4,6 @@ from __future__ import annotations
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 
-# Legacy counter metric (to be removed in US3)
-counter_value_gauge = Gauge(
-    "hello_counter_value",
-    "Current value of the hello counter"
-)
-
 # HTTP request metrics
 http_requests_total = Counter(
     "http_requests_total",

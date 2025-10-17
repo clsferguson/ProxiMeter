@@ -26,8 +26,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Create non-root user
 RUN useradd -m -u 10001 appuser
 
-# Copy app
+# Copy app and entrypoint
 COPY src ./src
+COPY entrypoint.sh ./entrypoint.sh
+
+# Make entrypoint executable
+RUN chmod +x /app/entrypoint.sh
 
 # Config directory (persist via volume)
 RUN mkdir -p /app/config && chown -R appuser:appuser /app
@@ -39,4 +43,4 @@ EXPOSE ${APP_PORT}
 HEALTHCHECK --interval=10s --timeout=2s --start-period=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:${APP_PORT}/health || exit 1
 
-CMD uvicorn src.app.wsgi:app --host 0.0.0.0 --port ${APP_PORT} --log-config /dev/null
+ENTRYPOINT ["/app/entrypoint.sh"]

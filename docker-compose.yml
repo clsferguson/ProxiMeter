@@ -4,10 +4,21 @@ services:
       context: .
       platforms:
         - linux/amd64
-    image: proximeter/hello-counter:dev
-    container_name: hello-counter
+    image: proximeter/rtsp-streams:dev
+    container_name: proximeter-rtsp-streams
+    platform: linux/amd64
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8000}:${APP_PORT:-8000}"
     volumes:
       - ./config:/app/config
+    environment:
+      - APP_PORT=${APP_PORT:-8000}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CI_DRY_RUN=${CI_DRY_RUN:-false}
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${APP_PORT:-8000}/health"]
+      interval: 10s
+      timeout: 2s
+      start_period: 5s
+      retries: 3

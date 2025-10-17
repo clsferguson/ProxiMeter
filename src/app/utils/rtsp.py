@@ -1,16 +1,21 @@
 """RTSP utilities for playback and frame generation."""
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 logger = logging.getLogger(__name__)
 
 
-async def generate_mjpeg_stream(rtsp_url: str, max_fps: float = 5.0) -> AsyncGenerator[bytes, None]:
+async def generate_mjpeg_stream(
+    rtsp_url: str, 
+    max_fps: float = 5.0,
+    stream_id: Optional[str] = None
+) -> AsyncGenerator[bytes, None]:
     """Generate MJPEG frames from RTSP stream at specified FPS cap.
     
     Args:
         rtsp_url: RTSP URL to decode
         max_fps: Maximum frames per second (default 5.0)
+        stream_id: Optional stream ID for status persistence on failure
         
     Yields:
         JPEG frame bytes with multipart boundary
@@ -25,6 +30,21 @@ async def generate_mjpeg_stream(rtsp_url: str, max_fps: float = 5.0) -> AsyncGen
     
     cap = None
     frame_interval = 1.0 / max_fps  # Time between frames in seconds
+    
+    async def _mark_stream_inactive():
+        """Mark stream as inactive in config on failure."""
+        if stream_id:
+            try:
+                from ..config_io import load_streams, save_streams
+                streams = load_streams()
+                for stream in streams:
+                    if stream.get("id") == stream_id and stream.get("status") != "Inactive":
+                        stream["status"] = "Inactive"
+                        save_streams(streams)
+                        logger.warning(f"Marked stream {stream_id} as Inactive due to playback failure")
+                        break
+            except Exception as e:
+                logger.error(f"Failed to mark stream {stream_id} as Inactive: {e}")
     
     try:
         # Open RTSP stream
@@ -71,6 +91,8 @@ async def generate_mjpeg_stream(rtsp_url: str, max_fps: float = 5.0) -> AsyncGen
             
     except Exception as e:
         logger.error(f"MJPEG stream error for {rtsp_url}: {e}")
+        # Mark stream as inactive on failure
+        await _mark_stream_inactive()
         raise RuntimeError(f"Stream playback failed: {e}")
     finally:
         if cap is not None:

@@ -83,41 +83,41 @@ Independent test criteria
 
 ## Phase 5: User Story 3 – Remove Legacy Counter & Update Header (P3)
 
-Goal: Legacy counter removed; only Add stream primary action; header says “ProxiMeter” with animations.
+Goal: Legacy counter removed; only Add stream primary action; header says "ProxiMeter" with animations.
 
-- [ ] T049 [US3] Ensure counter routes return 404 or redirect; remove Flask references `src/app/wsgi.py`
-- [ ] T050 [P] [US3] Remove counter UI/assets from templates/static `src/app/templates/`
-- [ ] T051 [US3] Update product docs with new flows and warnings `README.md`
+- [X] T049 [US3] Ensure counter routes return 404 or redirect; remove Flask references `src/app/wsgi.py`
+- [X] T050 [P] [US3] Remove counter UI/assets from templates/static `src/app/templates/`
+- [X] T051 [US3] Update product docs with new flows and warnings `README.md`
 
 Independent test criteria
 - No counter routes or UI; header text is “ProxiMeter”; desktop/mobile render correctly.
 
 ## Final Phase: Polish & Cross-Cutting
 
-- [ ] T052 Update OpenAPI docs with error schema and examples `specs/002-fastapi-rtsp-streams/contracts/openapi.yaml`
-- [ ] T053 [P] Add ARIA/keyboard reordering and focus management `src/app/templates/index.html`
-- [ ] T054 [P] Add container HEALTHCHECK for `/health` `Dockerfile`
-- [ ] T055 [P] Respect `APP_PORT` in startup and compose `docker-compose.yml` (default 8000; parameterize port mapping)
-- [ ] T056 [P] Ensure JSON logging for requests/errors is consistent `src/app/logging_config.py` (fields: time, level, msg, request_id, method, path, status, duration_ms)
-- [ ] T057 [P] Update Quickstart/README for new run instructions `README.md`
+- [X] T052 Update OpenAPI docs with error schema and examples `specs/002-fastapi-rtsp-streams/contracts/openapi.yaml`
+- [X] T053 [P] Add ARIA/keyboard reordering and focus management `src/app/templates/index.html`
+- [X] T054 [P] Add container HEALTHCHECK for `/health` `Dockerfile`
+- [X] T055 [P] Respect `APP_PORT` in startup and compose `docker-compose.yml` (default 8000; parameterize port mapping)
+- [X] T056 [P] Ensure JSON logging for requests/errors is consistent `src/app/logging_config.py` (fields: time, level, msg, request_id, method, path, status, duration_ms)
+- [X] T057 [P] Update Quickstart/README for new run instructions `README.md`
 
 ### Observability, Reliability, and Compliance (Constitution)
 
-- [ ] T058 [P] Expose Prometheus metrics endpoint at `/metrics` in `src/app/wsgi.py`
-- [ ] T059 [P] Implement metrics (fps gauge, playback frame counter, request latency histogram, create/delete/reorder counters) in `src/app/metrics.py`
-- [ ] T060 Add `entrypoint.sh` to emit versions (Python, FastAPI, Uvicorn, OpenCV); honor `CI_DRY_RUN=true`; start server
-- [ ] T061 Update `Dockerfile` to use `entrypoint.sh` and ASGI server (Uvicorn or Gunicorn with `uvicorn.workers.UvicornWorker`); keep HEALTHCHECK `/health`
-- [ ] T062 [P] Update `docker-compose.yml` (rename image/container, set `platform: linux/amd64`, mount `./config:/app/config`, expose `${APP_PORT:-8000}`)
-- [ ] T063 [P] Persist runtime playback failures: on generator error set `status=Inactive` and atomic-write YAML in `src/app/utils/rtsp.py`
-- [ ] T064 [P] Implement CSRF protection for HTML form POSTs in `src/app/ui/views.py` and templates (cookie token + hidden input validation)
-- [ ] T065 [P] Add graceful shutdown/watchdog with exponential backoff for RTSP reconnects in `src/app/utils/rtsp.py`
-- [ ] T066 [P] Add tests: YAML IO, validation, credential masking, `/health`, `/metrics`, `CI_DRY_RUN` startup in `tests/`
-- [ ] T067 [P] Create `artifacts/versions.md` and `artifacts/decisions.md` documenting FastAPI/ASGI and metrics exposure
-- [ ] T068 [P] Add `Makefile` with buildx (linux/amd64) build/run/test/push targets honoring `APP_PORT` and `CI_DRY_RUN`
-- [ ] T069 [P] Redact credentials from any log lines containing `rtsp_url` in `src/app/logging_config.py`
-- [ ] T070 [P] Add request ID middleware and propagate to logs and error responses in `src/app/wsgi.py`
-- [ ] T071 [P] Update README with LAN-only posture, WAN warning, metrics endpoint, entrypoint behavior, and `APP_PORT`
-- [ ] T072 [P] Implement accessibility specifics: focus outlines, dialog focus trap/return, ARIA live announcements for reorder, keyboard bindings in `src/app/templates/` and `src/app/static/app.js`
+- [X] T058 [P] Expose Prometheus metrics endpoint at `/metrics` in `src/app/wsgi.py`
+- [X] T059 [P] Implement metrics (fps gauge, playback frame counter, request latency histogram, create/delete/reorder counters) in `src/app/metrics.py`
+- [X] T060 Add `entrypoint.sh` to emit versions (Python, FastAPI, Uvicorn, OpenCV); honor `CI_DRY_RUN=true`; start server
+- [X] T061 Update `Dockerfile` to use `entrypoint.sh` and ASGI server (Uvicorn or Gunicorn with `uvicorn.workers.UvicornWorker`); keep HEALTHCHECK `/health`
+- [X] T062 [P] Update `docker-compose.yml` (rename image/container, set `platform: linux/amd64`, mount `./config:/app/config`, expose `${APP_PORT:-8000}`)
+- [X] T063 [P] Persist runtime playback failures: on generator error set `status=Inactive` and atomic-write YAML in `src/app/utils/rtsp.py`
+- [ ] T064 [P] Implement CSRF protection for HTML form POSTs in `src/app/ui/views.py` and templates (cookie token + hidden input validation) [DEFERRED - LAN-only deployment]
+- [ ] T065 [P] Add graceful shutdown/watchdog with exponential backoff for RTSP reconnects in `src/app/utils/rtsp.py` [DEFERRED - Future enhancement]
+- [ ] T066 [P] Add tests: YAML IO, validation, credential masking, `/health`, `/metrics`, `CI_DRY_RUN` startup in `tests/` [DEFERRED - Future enhancement]
+- [X] T067 [P] Create `artifacts/versions.md` and `artifacts/decisions.md` documenting FastAPI/ASGI and metrics exposure
+- [X] T068 [P] Add `Makefile` with buildx (linux/amd64) build/run/test/push targets honoring `APP_PORT` and `CI_DRY_RUN`
+- [X] T069 [P] Redact credentials from any log lines containing `rtsp_url` in `src/app/logging_config.py`
+- [X] T070 [P] Add request ID middleware and propagate to logs and error responses in `src/app/wsgi.py`
+- [X] T071 [P] Update README with LAN-only posture, WAN warning, metrics endpoint, entrypoint behavior, and `APP_PORT`
+- [X] T072 [P] Implement accessibility specifics: focus outlines, dialog focus trap/return, ARIA live announcements for reorder, keyboard bindings in `src/app/templates/` and `src/app/static/app.js`
 
 ---
 

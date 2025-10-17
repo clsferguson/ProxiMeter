@@ -4,25 +4,50 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from typing import Any
 
 
+# Regex pattern to match RTSP URLs with credentials
+RTSP_CREDENTIAL_PATTERN = re.compile(
+    r'rtsp://([^:]+):([^@]+)@',
+    re.IGNORECASE
+)
+
+
+def redact_credentials(message: str) -> str:
+    """Redact credentials from RTSP URLs in log messages.
+    
+    Args:
+        message: Log message that may contain RTSP URLs with credentials
+        
+    Returns:
+        Message with credentials replaced by ***:***
+    """
+    return RTSP_CREDENTIAL_PATTERN.sub(r'rtsp://***:***@', message)
+
+
 class JSONFormatter(logging.Formatter):
-    """Format log records as newline-delimited JSON."""
+    """Format log records as newline-delimited JSON with credential redaction."""
 
     def format(self, record: logging.LogRecord) -> str:
-        """Format a log record as a JSON string."""
+        """Format a log record as a JSON string with credentials redacted."""
+        # Redact credentials from the message
+        message = self.formatMessage(record)
+        message = redact_credentials(message)
+        
         log_data: dict[str, Any] = {
             "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": message,
         }
 
         if record.exc_info:
-            log_data["exception"] = self.formatException(record.exc_info)
+            exception_text = self.formatException(record.exc_info)
+            log_data["exception"] = redact_credentials(exception_text)
 
         # Add any extra fields from the record's __dict__
         for key, value in record.__dict__.items():
@@ -31,6 +56,9 @@ class JSONFormatter(logging.Formatter):
                           "message", "pathname", "process", "processName", 
                           "relativeCreated", "thread", "threadName", "exc_info", 
                           "exc_text", "stack_info", "taskName"]:
+                # Redact credentials from string values
+                if isinstance(value, str):
+                    value = redact_credentials(value)
                 log_data[key] = value
 
         return json.dumps(log_data, ensure_ascii=False)

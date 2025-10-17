@@ -1,5 +1,5 @@
 """FastAPI ASGI application entry point."""
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.exceptions import RequestValidationError
@@ -55,6 +55,19 @@ app.include_router(streams.router)
 
 # UI views (no prefix, serves from root)
 app.include_router(views.router)
+
+# Metrics endpoint
+from .metrics import get_metrics
+
+@app.get("/metrics", tags=["monitoring"])
+async def metrics_endpoint():
+    """Prometheus metrics endpoint.
+    
+    Returns:
+        Response: Prometheus-format metrics
+    """
+    body, status_code, headers = get_metrics()
+    return Response(content=body, status_code=status_code, headers=headers)
 
 # Mount static files
 static_dir = Path(__file__).parent / "static"

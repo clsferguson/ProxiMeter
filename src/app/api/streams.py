@@ -225,9 +225,9 @@ async def playback_stream(
         )
     
     try:
-        # Generate MJPEG stream with 5 FPS cap
+        # Generate MJPEG stream with 5 FPS cap (pass stream_id for failure tracking)
         return StreamingResponse(
-            generate_mjpeg_stream(rtsp_url, max_fps=5.0),
+            generate_mjpeg_stream(rtsp_url, max_fps=5.0, stream_id=stream_id),
             media_type="multipart/x-mixed-replace; boundary=frame",
             headers={
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
