@@ -5,8 +5,8 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 import logging
 
-from app.services.streams_service import StreamsService
-from app.utils.strings import mask_rtsp_credentials
+from ..services.streams_service import StreamsService
+from ..utils.strings import mask_rtsp_credentials
 
 logger = logging.getLogger(__name__)
 
