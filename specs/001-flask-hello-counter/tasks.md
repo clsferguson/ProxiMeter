@@ -100,10 +100,10 @@ Checkpoint: User Story 3 is complete.
 
 Purpose: Improvements that affect multiple user stories.
 
-- [ ] T018 Run `specs/001-flask-hello-counter/quickstart.md` commands to validate and update as needed if port/paths differ
-- [ ] T019 [P] Add JSON logging configuration controlled by `LOG_LEVEL` env (default INFO); emit newline-delimited JSON.
-- [ ] T020 [P] Add `/metrics` endpoint using `prometheus_client`: include gauge for current counter value and a simple HTTP request counter; expose process metrics.
-- [ ] T021 [P] Implement `CI_DRY_RUN` behavior: in dry-run, use in-memory counter and avoid disk writes; still serve `/health` and `/metrics`.
+- [X] T018 Run `specs/001-flask-hello-counter/quickstart.md` commands to validate and update as needed if port/paths differ
+- [X] T019 [P] Add JSON logging configuration controlled by `LOG_LEVEL` env (default INFO); emit newline-delimited JSON.
+- [X] T020 [P] Add `/metrics` endpoint using `prometheus_client`: include gauge for current counter value and a simple HTTP request counter; expose process metrics.
+- [X] T021 [P] Implement `CI_DRY_RUN` behavior: in dry-run, use in-memory counter and avoid disk writes; still serve `/health` and `/metrics`.
 
 ---
 
