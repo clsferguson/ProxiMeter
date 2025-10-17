@@ -4,11 +4,11 @@ import logging
 from datetime import datetime
 import uuid
 
-from app.config_io import load_streams, save_streams
-from app.models.stream import Stream, NewStream
-from app.utils.validation import validate_rtsp_url
-from app.utils.strings import normalize_stream_name
-from app.utils.rtsp import probe_rtsp_stream
+from ..config_io import load_streams, save_streams
+from ..models.stream import Stream, NewStream
+from ..utils.validation import validate_rtsp_url
+from ..utils.strings import normalize_stream_name
+from ..utils.rtsp import probe_rtsp_stream
 
 logger = logging.getLogger(__name__)
 

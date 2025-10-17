@@ -4,10 +4,10 @@ from fastapi.responses import StreamingResponse
 from typing import List
 import logging
 
-from app.models.stream import NewStream, Stream
-from app.services.streams_service import StreamsService
-from app.utils.rtsp import generate_mjpeg_stream
-from app.utils.strings import mask_rtsp_credentials
+from ..models.stream import NewStream, Stream
+from ..services.streams_service import StreamsService
+from ..utils.rtsp import generate_mjpeg_stream
+from ..utils.strings import mask_rtsp_credentials
 
 logger = logging.getLogger(__name__)
 
