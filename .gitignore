@@ -1,0 +1,80 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Packaging and build
+build/
+dist/
+.eggs/
+*.egg-info/
+*.egg
+wheels/
+MANIFEST
+pip-wheel-metadata/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Testing & type checking
+.pytest_cache/
+.coverage
+.coverage.*
+.cache/
+.hypothesis/
+.mypy_cache/
+.pytype/
+.tox/
+.nox/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+logs/
+*.log
+
+# IDE/editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.orig
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment/config
+.env
+.env.*
+!.env.example
+config/config.yml
+
+# Docker & runtime
+.docker/
+docker-compose.override.yml
+.tmp/
+tmp/
+
+# ML/AI common artifacts (not source)
+wandb/
+lightning_logs/
+outputs/
+runs/
+models/
+checkpoints/
+
+# Node (if present in UI tooling)
+node_modules/
