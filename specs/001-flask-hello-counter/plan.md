@@ -18,13 +18,13 @@ Primary approach: Flask application packaged in a Docker image based on a slim P
 ## Technical Context
 
 **Language/Version**: Python 3.12  
-**Primary Dependencies**: Flask (UI/routing), Jinja2 (templating), PyYAML (YAML persistence), Gunicorn (WSGI server)  
+**Primary Dependencies**: Flask (UI/routing), Jinja2 (templating), PyYAML (YAML persistence), Gunicorn (WSGI server), prometheus-client (metrics)  
 **Storage**: YAML file `config.yml` persisted on a bound volume  
 **Testing**: pytest for unit tests of config load/save and route handlers  
 **Target Platform**: Docker linux/amd64 (container-only)  
 **Project Type**: Single web backend (server-rendered HTML with minimal JS)  
-**Performance Goals**: Page loads and button actions complete within 2 seconds on a local machine; health responds <200 ms when ready  
-**Constraints**: No GPUs or external services required; no auth (LAN-only posture documented); persist only `config.yml`  
+**Performance Goals**: Page loads and button actions complete within 2 seconds on a local machine; health responds <200 ms when ready; metrics endpoint responds within typical request latencies  
+**Constraints**: No GPUs or external services required; no auth (LAN-only posture documented); persist only `config.yml`; provide `/metrics` and JSON logs; support `CI_DRY_RUN=true`  
 **Scale/Scope**: Single landing page, one counter entity, minimal routes
 
 ## Constitution Check
@@ -32,7 +32,7 @@ Primary approach: Flask application packaged in a Docker image based on a slim P
 Gate evaluation for this MVP:
 - Docker-only runtime on linux/amd64; no host execution paths → PASS (Dockerfile + CI enforce amd64)
 - Persist ONLY `/app/config/config.yml` via volume; no model caches/artifacts → PASS (counter only)
-- Observability: JSON logs, /health, Prometheus metrics present → PARTIAL (health endpoint provided now; JSON logs optional basic; Prometheus metrics deferred as not required by this MVP and adds no user value)
+- Observability: JSON logs, /health, Prometheus metrics present → ALIGN (health and metrics endpoints provided for MVP; lightweight JSON logging enabled)
 - Security: non-root, input validation, rate-limits; restricted file I/O; LAN-only, no-auth → PASS (non-root image, restricted config path; document LAN-only posture; rate-limit not critical for MVP but requests are minimal)
 - CI/build: buildx with `--platform=linux/amd64`; healthcheck in image; CPU-only runners → PASS (CI workflow builds amd64 and runs smoke test on hosted runners)
 - CI dry-run, GPU constraints, YOLO/RTSP model constraints → OUT-OF-SCOPE FOR THIS FEATURE (no models/RTSP in MVP; does not conflict with constitution; to be added in later features)
@@ -75,11 +75,11 @@ LICENSE (MIT)
 README.md
 ```
 
-**Structure Decision**: Single backend Flask app under `src/app` with a simple templated UI and one small API endpoint; YAML persisted under `/app/config/config.yml` in the container.
+**Structure Decision**: Single backend Flask app under `src/app` with a simple templated UI and small API endpoints; YAML persisted under `/app/config/config.yml` in the container; expose `/health` and `/metrics`; configure JSON logging via env.
 
 ## Complexity Tracking
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
-| Prometheus metrics omitted in MVP | Adds no user-visible value for hello-counter; increases footprint | Keeping MVP minimal to reach operational baseline faster; metrics can be added in a follow-up feature |
+| Minimal Prometheus metrics included | Meet constitution while keeping footprint small | Full suite deferred; minimal gauges/counters suffice for MVP |
 | GPU/model/RTSP requirements out-of-scope | This feature is a bootstrap skeleton; no inference/model use | Forcing model/RTSP scaffolding now would increase scope and delay MVP without benefits |

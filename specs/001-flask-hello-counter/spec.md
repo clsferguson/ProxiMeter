@@ -81,20 +81,32 @@ Acceptance Scenarios:
 - FR-008: Include a top‑level `LICENSE` file with the MIT License text and correct copyright holder and year.
 - FR-009: Do not require authentication or external services for this MVP.
 - FR-010: Keep all specification and UI language neutral and accessible; avoid implementation‑specific details in user‑facing documentation.
+- FR-011: Observability endpoint and minimal logging.
+	- Provide a Prometheus-compatible metrics endpoint at `GET /metrics` (Content-Type: text/plain) exposing:
+		- A gauge for the current counter value (e.g., `app_counter_value`).
+		- A counter for HTTP requests (e.g., `http_requests_total{method,path,status}`) or equivalent via middleware.
+		- Basic process/runtime metrics via the standard client library.
+	- Emit structured JSON logs with an environment-configurable level `LOG_LEVEL` (default `INFO`).
+	- Acceptance: `/metrics` returns 200 with Prometheus text format; logs are newline-delimited JSON entries including timestamp, level, and message.
 
 #### Non-Functional Requirements
 
 - NFR-001 (Accessibility): Keyboard navigation must allow focusing and activating the increment button via keyboard (e.g., Tab/Enter/Space). Focus states must be visible (see FR‑001 focus visibility). Color contrast for text and interactive elements must meet WCAG 2.1 AA (≥ 4.5:1 for normal text).
 - NFR-002 (Performance): UI update on increment should be ≤ 200 ms (see FR‑002). Initial page load should allow reading and incrementing within 2 seconds (see SC‑001). Health endpoint should respond < 200 ms when ready (see SC‑004).
 - NFR-003 (Security posture): Container must run as non‑root. No authentication; intended for LAN‑only usage in MVP. README must note LAN‑only/no‑auth posture explicitly.
-- NFR-004 (Observability): Structured logging and metrics are intentionally excluded for this MVP. Minimal user‑visible messages are required for configuration errors (see Edge Cases). Future features may add observability.
+- NFR-004 (Observability): Provide minimal observability for this MVP: structured JSON logging (env-controlled) and a Prometheus-compatible `/metrics` endpoint (see FR‑015). Keep footprint small; advanced metrics can be added later.
+- NFR-005 (CI dry‑run mode): When `CI_DRY_RUN=true`, the application must start without writing to disk, use an in‑memory counter initialized to 0, and still serve `/health` and `/metrics`. Intended for CPU‑only CI on hosted runners.
 
 #### CI/CD (GitHub Actions) Requirements
 
-- FR-011: Provide a continuous integration workflow that runs automatically on pull requests and pushes to the default branch and performs: (a) container image build for linux/amd64, and (b) a smoke test that runs the container and verifies readiness via an HTTP GET to `/health`.
-- FR-012: The CI workflow must not require GPUs or external services; it must execute successfully on standard hosted runners.
-- FR-013: The CI workflow must fail if the container fails to build, fails to start, or `/health` does not return HTTP 200 with body `ok` within 30 seconds of container startup.
-- FR-014: The CI workflow must report status on pull requests and expose basic logs sufficient to diagnose typical build/startup failures.
+- FR-012: Provide a continuous integration workflow that runs automatically on pull requests and pushes to the default branch and performs: (a) container image build for linux/amd64, and (b) a smoke test that runs the container and verifies readiness via an HTTP GET to `/health`.
+- FR-013: The CI workflow must not require GPUs or external services; it must execute successfully on standard hosted runners.
+- FR-014: The CI workflow must fail if the container fails to build, fails to start, or `/health` does not return HTTP 200 with body `ok` within 30 seconds of container startup.
+- FR-015: The CI workflow must report status on pull requests and expose basic logs sufficient to diagnose typical build/startup failures.
+
+Documentation requirements
+
+- The top‑level `README.md` must include a friendly, plain‑language note that the app is intended for trusted LAN environments and does not include authentication (do not expose to WAN). It should also briefly mention the `/health` and `/metrics` endpoints and how to map the host `./config` folder to `/app/config` in the container.
 
 ### Key Entities (data)
 

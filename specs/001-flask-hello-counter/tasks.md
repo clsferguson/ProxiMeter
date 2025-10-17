@@ -57,7 +57,7 @@ Independent Test: Load `/`, click "Increment", refresh; the value remains increm
 Implementation
 
 - [ ] T009 [P] [US1] Create dark theme with purple highlights stylesheet `src/app/static/styles.css`
-- [ ] T010 [US1] Create `src/app/templates/index.html` (hello message, current counter value, increment button, embedded JS `fetch('/api/counter', {method:'POST'})` to update the DOM; show messages for cap reached/write errors)
+- [ ] T010 [US1] Create `src/app/templates/index.html` (hello message, current counter value, increment button, embedded JS `fetch('/api/counter', {method:'POST'})` to update the DOM; show messages for cap reached/write errors). Ensure keyboard accessibility (Enter/Space activates button) and visible 2px focus outline (#7C3AED).
 - [ ] T011 [US1] Implement routes in `src/app/routes.py`: `GET /` render `index.html` with current value; `GET /api/counter` return JSON `{counter}`; `POST /api/counter` increment with cap, persist via `config_io`
 - [ ] T012 [P] [US1] Register routes blueprint in app factory (`src/app/__init__.py`): import `register_blueprint` and call from `create_app()`
 
@@ -74,8 +74,8 @@ Independent Test: Build the image (linux/amd64), run the container, access `/` a
 Implementation
 
 - [ ] T013 [US2] Implement health endpoint in `src/app/routes.py`: `GET /health` → return 200 "ok"
-- [ ] T014 [P] [US2] Create `Dockerfile` at repo root: base `python:3.12-slim`, copy app, `pip install -r requirements.txt`, non-root user, expose 8000, `HEALTHCHECK` hitting `/health`, `CMD ["gunicorn","-w","2","-b","0.0.0.0:8000","src.app.wsgi:app"]`
-- [ ] T015 [P] [US2] Add CI workflow `.github/workflows/ci.yml` to build linux/amd64 image and smoke-test `/health` by running the container and curling `http://localhost:8000/health`
+- [ ] T014 [P] [US2] Create `Dockerfile` at repo root: base `python:3.12-slim-trixie`, copy app, `pip install -r requirements.txt`, non-root user, expose 8000, `HEALTHCHECK` hitting `/health`, `CMD ["gunicorn","-w","2","-b","0.0.0.0:8000","src.app.wsgi:app"]`
+- [ ] T015 [P] [US2] Add CI workflow `.github/workflows/ci.yml` to build linux/amd64 image and smoke-test `/health` by running the container. Export `CI_DRY_RUN=true`; poll `http://localhost:8000/health` for up to 30s (1s interval) and fail if not `200 ok`. Optionally validate `GET /metrics` returns 200.
 
 Checkpoint: User Story 2 is independently verifiable via container build/run and health check.
 
@@ -89,7 +89,7 @@ Independent Test: README explains build/run with volume for `config.yml`; LICENS
 
 Implementation
 
-- [ ] T016 [P] [US3] Create `README.md` at repo root with project description, docker build/run commands, and persistence notes (map host `./config` to `/app/config`)
+- [ ] T016 [P] [US3] Create `README.md` at repo root with project description, docker build/run commands, and persistence notes (map host `./config` to `/app/config`). The README must include, at minimum, a friendly LAN-only/no-auth safety note and brief mentions of `/health` and `/metrics` endpoints per constitution, while keeping tone friendly.
 - [ ] T017 [P] [US3] Create `LICENSE` at repo root with MIT License (© 2025 clsferguson)
 
 Checkpoint: User Story 3 is complete.
@@ -101,6 +101,9 @@ Checkpoint: User Story 3 is complete.
 Purpose: Improvements that affect multiple user stories.
 
 - [ ] T018 Run `specs/001-flask-hello-counter/quickstart.md` commands to validate and update as needed if port/paths differ
+- [ ] T019 [P] Add JSON logging configuration controlled by `LOG_LEVEL` env (default INFO); emit newline-delimited JSON.
+- [ ] T020 [P] Add `/metrics` endpoint using `prometheus_client`: include gauge for current counter value and a simple HTTP request counter; expose process metrics.
+- [ ] T021 [P] Implement `CI_DRY_RUN` behavior: in dry-run, use in-memory counter and avoid disk writes; still serve `/health` and `/metrics`.
 
 ---
 
