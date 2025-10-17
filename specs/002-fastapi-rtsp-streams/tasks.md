@@ -68,15 +68,15 @@ Independent test criteria
 
 Goal: List saved streams as equal-width buttons; reorder via drag handle; delete with confirm; edit stream; header animates back on return.
 
-- [ ] T040 [US2] Implement `GET /api/streams` list with masked URLs `src/app/api/streams.py`
-- [ ] T041 [P] [US2] Implement `DELETE /api/streams/{id}` with renumber `src/app/api/streams.py`
-- [ ] T042 [P] [US2] Implement `PATCH /api/streams/{id}` partial edit `src/app/api/streams.py`
-- [ ] T043 [P] [US2] Implement `POST /api/streams/reorder` idempotent `src/app/api/streams.py`
-- [ ] T044 [US2] Render list grid with equal-width buttons + actions `src/app/templates/index.html`
-- [ ] T045 [P] [US2] Add delete confirmation modal behavior `src/app/static/app.js`
-- [ ] T046 [P] [US2] Add drag-and-drop reorder and POST to API `src/app/static/app.js`
-- [ ] T047 [P] [US2] Add Edit Stream form + routes `src/app/templates/edit_stream.html`
-- [ ] T048 [US2] Animate header back on landing return `src/app/static/app.js`
+- [X] T040 [US2] Implement `GET /api/streams` list with masked URLs `src/app/api/streams.py`
+- [X] T041 [P] [US2] Implement `DELETE /api/streams/{id}` with renumber `src/app/api/streams.py`
+- [X] T042 [P] [US2] Implement `PATCH /api/streams/{id}` partial edit `src/app/api/streams.py`
+- [X] T043 [P] [US2] Implement `POST /api/streams/reorder` idempotent `src/app/api/streams.py`
+- [X] T044 [US2] Render list grid with equal-width buttons + actions `src/app/templates/index.html`
+- [X] T045 [P] [US2] Add delete confirmation modal behavior `src/app/static/app.js`
+- [X] T046 [P] [US2] Add drag-and-drop reorder and POST to API `src/app/static/app.js`
+- [X] T047 [P] [US2] Add Edit Stream form + routes `src/app/templates/edit_stream.html`
+- [X] T048 [US2] Animate header back on landing return `src/app/static/app.js`
 
 Independent test criteria
 - With multiple streams, drag to reorder persists across reloads; Delete requires confirm and updates immediately; equal-width layout within ±2px.

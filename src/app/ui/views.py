@@ -99,3 +99,79 @@ async def playback_page(request: Request, stream_id: str):
         "request": request,
         "stream": stream
     })
+
+
+@router.get("/streams/{stream_id}/edit", response_class=HTMLResponse)
+async def edit_stream_form(request: Request, stream_id: str):
+    """Render the edit stream form."""
+    service = StreamsService()
+    stream = await service.get_stream(stream_id)
+    
+    if not stream:
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "error": f"Stream not found: {stream_id}"
+        }, status_code=404)
+    
+    return templates.TemplateResponse("edit_stream.html", {
+        "request": request,
+        "stream": stream,
+        "error": None,
+        "name": None,
+        "rtsp_url": None
+    })
+
+
+@router.post("/streams/{stream_id}/edit")
+async def edit_stream_submit(
+    request: Request,
+    stream_id: str,
+    name: str = Form(...),
+    rtsp_url: str = Form(...)
+):
+    """Handle edit stream form submission."""
+    service = StreamsService()
+    
+    # Get the original stream for fallback
+    stream = await service.get_stream(stream_id)
+    if not stream:
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "error": f"Stream not found: {stream_id}"
+        }, status_code=404)
+    
+    try:
+        # Update the stream
+        updated_stream = await service.update_stream(
+            stream_id=stream_id,
+            name=name,
+            rtsp_url=rtsp_url
+        )
+        
+        if not updated_stream:
+            return templates.TemplateResponse("error.html", {
+                "request": request,
+                "error": f"Stream not found: {stream_id}"
+            }, status_code=404)
+        
+        # Redirect to landing page
+        return RedirectResponse(url="/", status_code=303)
+        
+    except ValueError as e:
+        # Validation error - re-render form with error
+        return templates.TemplateResponse("edit_stream.html", {
+            "request": request,
+            "stream": stream,
+            "error": str(e),
+            "name": name,
+            "rtsp_url": rtsp_url
+        }, status_code=400)
+    except Exception as e:
+        logger.error(f"Error editing stream {stream_id}: {e}", exc_info=True)
+        return templates.TemplateResponse("edit_stream.html", {
+            "request": request,
+            "stream": stream,
+            "error": "An unexpected error occurred. Please try again.",
+            "name": name,
+            "rtsp_url": rtsp_url
+        }, status_code=500)

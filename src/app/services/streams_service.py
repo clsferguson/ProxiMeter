@@ -117,9 +117,65 @@ class StreamsService:
             
         Returns:
             Updated stream dictionary or None if not found
+            
+        Raises:
+            ValueError: If validation fails
         """
-        # TODO: Implement in T042
-        return None
+        # Load existing streams
+        streams = load_streams()
+        
+        # Find the stream to update
+        stream_index = None
+        for i, stream in enumerate(streams):
+            if stream.get("id") == stream_id:
+                stream_index = i
+                break
+        
+        if stream_index is None:
+            return None
+        
+        stream = streams[stream_index]
+        url_changed = False
+        
+        # Update name if provided
+        if name is not None:
+            name = name.strip()
+            if not name or len(name) > 50:
+                raise ValueError("Name must be 1-50 characters after trimming")
+            
+            # Check for duplicate name (case-insensitive), excluding current stream
+            normalized_name = normalize_stream_name(name)
+            for i, s in enumerate(streams):
+                if i != stream_index and normalize_stream_name(s.get("name", "")) == normalized_name:
+                    raise ValueError(f"Stream name '{name}' already exists (case-insensitive)")
+            
+            stream["name"] = name
+        
+        # Update RTSP URL if provided
+        if rtsp_url is not None:
+            rtsp_url = rtsp_url.strip()
+            
+            # Validate RTSP URL format
+            is_valid, error_msg = validate_rtsp_url(rtsp_url)
+            if not is_valid:
+                raise ValueError(error_msg)
+            
+            stream["rtsp_url"] = rtsp_url
+            url_changed = True
+        
+        # Re-probe if URL changed
+        if url_changed:
+            logger.info(f"Re-probing RTSP stream {stream_id} after URL change")
+            is_reachable = await probe_rtsp_stream(stream["rtsp_url"], timeout_seconds=2.0)
+            stream["status"] = "Active" if is_reachable else "Inactive"
+            logger.info(f"Stream {stream_id} status updated to {stream['status']}")
+        
+        # Save updated streams
+        streams[stream_index] = stream
+        save_streams(streams)
+        
+        logger.info(f"Updated stream {stream_id}")
+        return stream
     
     async def delete_stream(self, stream_id: str) -> bool:
         """Delete a stream and renumber orders.
@@ -130,8 +186,30 @@ class StreamsService:
         Returns:
             True if deleted, False if not found
         """
-        # TODO: Implement in T041
-        return False
+        # Load existing streams
+        streams = load_streams()
+        
+        # Find and remove the stream
+        stream_found = False
+        for i, stream in enumerate(streams):
+            if stream.get("id") == stream_id:
+                streams.pop(i)
+                stream_found = True
+                logger.info(f"Deleted stream {stream_id}")
+                break
+        
+        if not stream_found:
+            return False
+        
+        # Renumber remaining streams (contiguous ordering starting at 0)
+        for i, stream in enumerate(streams):
+            stream["order"] = i
+        
+        # Save updated streams
+        save_streams(streams)
+        
+        logger.info(f"Renumbered {len(streams)} remaining streams")
+        return True
     
     async def reorder_streams(self, order: List[str]) -> bool:
         """Reorder streams by ID list.
@@ -143,7 +221,47 @@ class StreamsService:
             True if successful
             
         Raises:
-            ValueError: If order is invalid
+            ValueError: If order is invalid (duplicates, missing IDs)
         """
-        # TODO: Implement in T043
-        raise NotImplementedError("Reorder not yet implemented")
+        # Load existing streams
+        streams = load_streams()
+        
+        # No-op if 0 or 1 streams
+        if len(streams) <= 1:
+            logger.info("Reorder no-op: ≤1 streams")
+            return True
+        
+        # Validate order list
+        if len(order) != len(streams):
+            raise ValueError(f"Order list must contain exactly {len(streams)} stream IDs")
+        
+        # Check for duplicates
+        if len(set(order)) != len(order):
+            raise ValueError("Order list contains duplicate IDs")
+        
+        # Build a map of existing streams by ID
+        stream_map = {s.get("id"): s for s in streams}
+        
+        # Validate all IDs exist
+        for stream_id in order:
+            if stream_id not in stream_map:
+                raise ValueError(f"Unknown stream ID in order list: {stream_id}")
+        
+        # Check if order is already the same (idempotent)
+        current_order = [s.get("id") for s in streams]
+        if current_order == order:
+            logger.info("Reorder no-op: order unchanged")
+            return True
+        
+        # Reorder streams according to the provided list
+        reordered_streams = []
+        for i, stream_id in enumerate(order):
+            stream = stream_map[stream_id].copy()
+            stream["order"] = i
+            reordered_streams.append(stream)
+        
+        # Save reordered streams
+        save_streams(reordered_streams)
+        
+        logger.info(f"Reordered {len(reordered_streams)} streams")
+        return True

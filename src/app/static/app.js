@@ -38,10 +38,89 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// Drag and drop reordering (to be implemented in T046)
+// Drag and drop reordering
 function initializeDragAndDrop() {
-  // TODO: Implement drag-and-drop in T046
-  console.log('Drag-and-drop not yet implemented');
+  const grid = document.getElementById('streams-grid');
+  if (!grid) {
+    return; // No grid on this page
+  }
+  
+  const items = grid.querySelectorAll('.stream-item');
+  if (items.length <= 1) {
+    return; // No reordering needed for 0 or 1 items
+  }
+  
+  let draggedElement = null;
+  
+  items.forEach(item => {
+    const handle = item.querySelector('.drag-handle');
+    if (!handle) return;
+    
+    // Make item draggable via handle
+    handle.addEventListener('mousedown', (e) => {
+      item.setAttribute('draggable', 'true');
+    });
+    
+    item.addEventListener('dragstart', (e) => {
+      draggedElement = item;
+      item.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/html', item.innerHTML);
+    });
+    
+    item.addEventListener('dragend', (e) => {
+      item.classList.remove('dragging');
+      item.setAttribute('draggable', 'false');
+      
+      // Save new order to server
+      saveStreamOrder();
+    });
+    
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      
+      if (draggedElement && draggedElement !== item) {
+        const rect = item.getBoundingClientRect();
+        const midpoint = rect.top + rect.height / 2;
+        
+        if (e.clientY < midpoint) {
+          grid.insertBefore(draggedElement, item);
+        } else {
+          grid.insertBefore(draggedElement, item.nextSibling);
+        }
+      }
+    });
+  });
+}
+
+// Save stream order to server
+async function saveStreamOrder() {
+  const grid = document.getElementById('streams-grid');
+  if (!grid) return;
+  
+  const items = grid.querySelectorAll('.stream-item');
+  const order = Array.from(items).map(item => item.dataset.streamId);
+  
+  try {
+    const response = await fetch('/api/streams/reorder', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ order })
+    });
+    
+    if (!response.ok) {
+      console.error('Failed to save stream order');
+      // Reload page to restore correct order
+      window.location.reload();
+    }
+  } catch (error) {
+    console.error('Error saving stream order:', error);
+    // Reload page to restore correct order
+    window.location.reload();
+  }
 }
 
 // Initialize on page load

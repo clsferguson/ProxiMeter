@@ -184,6 +184,14 @@ body {
   position: relative;
 }
 
+.stream-item.dragging {
+  opacity: 0.5;
+}
+
+.stream-item[draggable="true"] {
+  cursor: move;
+}
+
 .stream-actions {
   display: flex;
   gap: 0.5rem;
@@ -205,6 +213,14 @@ body {
 .btn-icon:hover {
   background: rgba(124,58,237,.1);
   border-color: var(--purple);
+}
+
+.drag-handle {
+  cursor: grab;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 .stream-status {

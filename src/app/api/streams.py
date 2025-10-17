@@ -19,12 +19,30 @@ def get_streams_service() -> StreamsService:
     return StreamsService()
 
 
-# Placeholder endpoints - will be implemented in Phase 3 and 4
-@router.get("/")
-async def list_streams():
-    """List all streams."""
-    # TODO: Implement in T040
-    return []
+@router.get("/", response_model=List[dict])
+async def list_streams(
+    service: StreamsService = Depends(get_streams_service)
+):
+    """List all streams with masked credentials.
+    
+    Returns streams sorted by order field.
+    Credentials in rtsp_url are masked in responses.
+    """
+    try:
+        streams = await service.list_streams()
+        
+        # Mask credentials in all responses
+        for stream in streams:
+            if "rtsp_url" in stream:
+                stream["rtsp_url"] = mask_rtsp_credentials(stream["rtsp_url"])
+        
+        return streams
+    except Exception as e:
+        logger.error(f"Error listing streams: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list streams"
+        )
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
@@ -64,24 +82,122 @@ async def create_stream(
 
 
 @router.patch("/{stream_id}")
-async def edit_stream(stream_id: str):
-    """Edit an existing stream."""
-    # TODO: Implement in T042
-    raise HTTPException(status_code=501, detail="Not implemented")
+async def edit_stream(
+    stream_id: str,
+    edit_data: dict,
+    service: StreamsService = Depends(get_streams_service)
+):
+    """Edit an existing stream (partial update).
+    
+    Accepts partial updates for name and/or rtsp_url.
+    Validates formats, checks uniqueness, re-probes if URL changed.
+    Returns updated stream with masked credentials.
+    """
+    try:
+        # Extract optional fields
+        name = edit_data.get("name")
+        rtsp_url = edit_data.get("rtsp_url")
+        
+        # Update stream
+        updated_stream = await service.update_stream(
+            stream_id=stream_id,
+            name=name,
+            rtsp_url=rtsp_url
+        )
+        
+        if not updated_stream:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Stream {stream_id} not found"
+            )
+        
+        # Mask credentials in response
+        updated_stream["rtsp_url"] = mask_rtsp_credentials(updated_stream.get("rtsp_url", ""))
+        
+        return updated_stream
+    except ValueError as e:
+        # Validation errors
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error editing stream {stream_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to edit stream"
+        )
 
 
 @router.delete("/{stream_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_stream(stream_id: str):
-    """Delete a stream."""
-    # TODO: Implement in T041
-    raise HTTPException(status_code=501, detail="Not implemented")
+async def delete_stream(
+    stream_id: str,
+    service: StreamsService = Depends(get_streams_service)
+):
+    """Delete a stream and renumber remaining streams.
+    
+    Returns 204 No Content on success.
+    Returns 404 if stream not found.
+    """
+    try:
+        deleted = await service.delete_stream(stream_id)
+        
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Stream {stream_id} not found"
+            )
+        
+        # Return 204 No Content (no body)
+        return None
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting stream {stream_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete stream"
+        )
 
 
 @router.post("/reorder")
-async def reorder_streams():
-    """Reorder streams."""
-    # TODO: Implement in T043
-    raise HTTPException(status_code=501, detail="Not implemented")
+async def reorder_streams(
+    reorder_data: dict,
+    service: StreamsService = Depends(get_streams_service)
+):
+    """Reorder streams by ID list.
+    
+    Accepts { "order": ["uuid1", "uuid2", ...] }
+    Idempotent - returns 200 if order unchanged or ≤1 streams.
+    Returns 400 if order contains duplicates or missing IDs.
+    """
+    try:
+        order = reorder_data.get("order", [])
+        
+        if not isinstance(order, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Order must be a list of stream IDs"
+            )
+        
+        # Reorder streams
+        success = await service.reorder_streams(order)
+        
+        return {"success": success, "message": "Streams reordered successfully"}
+    except ValueError as e:
+        # Validation errors (duplicates, missing IDs, etc.)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error reordering streams: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reorder streams"
+        )
 
 
 @router.get("/play/{stream_id}.mjpg")
