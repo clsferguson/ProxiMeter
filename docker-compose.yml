@@ -1,0 +1,13 @@
+services:
+  app:
+    build:
+      context: .
+      platforms:
+        - linux/amd64
+    image: proximeter/hello-counter:dev
+    container_name: hello-counter
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config:/app/config
+    restart: unless-stopped

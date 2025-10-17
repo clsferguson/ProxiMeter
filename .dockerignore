@@ -1,0 +1,27 @@
+# Reduce Docker build context and exclude dev artifacts
+.git/
+.github/
+.vscode/
+.idea/
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+.venv/
+venv/
+ENV/
+env/
+*.log
+*.log*
+.env
+.env.*
+coverage/
+Dockerfile*
+.dockerignore
+node_modules/
+tmp/
+.tmp/
+config/*.yml
+*.sw?
+Thumbs.db
+.DS_Store
