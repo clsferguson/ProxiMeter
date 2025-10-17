@@ -149,13 +149,13 @@ GPU guarantees through documented, off-CI validation.
 
 ## Tooling & Evidence Requirements
 
-- During planning/implementation, agents MUST use web search to resolve latest
-	stable versions and installation guidance for CUDA/TensorRT (NVIDIA),
+- During planning/implementation, agents MUST use SearXNG web search to resolve 
+    latest stable versions and installation guidance for CUDA/TensorRT (NVIDIA),
 	ROCm/MIVisionX (AMD), OpenVINO (Intel), ONNX Runtime, PyTorch/TorchAudio/
-	TorchVision (if used), FFmpeg/GStreamer components, and Flask/Docker best
-	practices.
+	TorchVision (if used), FFmpeg/GStreamer components, Flask/Docker, or any 
+    other not mentioned packages best practices.
 - Agents MUST ingest and reference official documentation pages before pinning
-	versions or commands.
+	versions or commands, use the Context7 tool to look up documentation.
 - Agents MUST record resolved versions and documentation URLs in
 	`artifacts/versions.md` and implement `--version` checks in `entrypoint.sh` to
 	emit versions at startup.

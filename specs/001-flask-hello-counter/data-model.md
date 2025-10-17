@@ -3,7 +3,7 @@
 ## Entities
 
 ### Configuration
-- File: `config/config.yml`
+- File: `/app/config/config.yml`
 - Fields:
   - `counter` (integer, default 0, min 0, max 2_147_483_647)
 

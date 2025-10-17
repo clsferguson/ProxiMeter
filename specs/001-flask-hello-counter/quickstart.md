@@ -24,6 +24,11 @@ docker run --rm -p 8000:8000 -v "$config:/app/config" --name hello-counter $tag
 
 Open http://localhost:8000 to view the app. Use the button to increment the counter. Refresh: the value persists.
 
+If port 8000 is already in use, pick another host port, e.g.:
+```powershell
+docker run --rm -p 8080:8000 -v "$config:/app/config" --name hello-counter $tag
+```
+
 ## Health check
 ```powershell
 Invoke-WebRequest http://localhost:8000/health
@@ -31,3 +36,4 @@ Invoke-WebRequest http://localhost:8000/health
 
 ## CI expectations
 - On PRs and pushes, CI builds the image for linux/amd64 and runs a container to verify `/health`.
+	- Health is considered ready when status is 200 and body is `ok`.
