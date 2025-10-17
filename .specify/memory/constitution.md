@@ -1,50 +1,153 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+- Version change: none → 1.0.0
+- Modified principles: N/A (initial ratification)
+- Added sections: "Architecture & Execution Constraints", "Tooling & Evidence Requirements"
+- Removed sections: None
+- Templates requiring updates:
+	- .specify/templates/plan-template.md ✅ updated
+	- .specify/templates/spec-template.md ✅ updated
+	- .specify/templates/tasks-template.md ✅ updated
+	- .specify/templates/commands/* ⚠ pending (directory absent)
+	- README.md ⚠ pending (add env var matrix, backend support table, docker-compose example)
+	- artifacts/versions.md ⚠ pending (create and keep current)
+	- artifacts/decisions.md ⚠ pending (create and record trade-offs)
+- Follow-up TODOs:
+	- Create artifacts/versions.md and artifacts/decisions.md per Tooling policy
+	- Add README with examples for MQTT and HTTP SSE consumers
+	- Add docker-compose example with platform: linux/amd64 and GPU device exposure
+-->
+
+# Multi-RTSP Person Detection (Docker-only, amd64) Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Container-Only, Reproducible Runtime (NON-NEGOTIABLE)
+The application MUST run exclusively in Docker on linux/amd64. Images are
+multi-stage with a pinned base (python:3.12-slim-trixie), minimal OS packages,
+and a non-root user in the final image. Containers are stateless: the ONLY
+persisted file is `/app/config/config.yml`. No model caches or artifacts are
+persisted between runs. A HEALTHCHECK MUST probe `/health`.
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+Rationale: Determinism, portability, and secure-by-default execution.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### II. Single Model, Many Streams with Backpressure Discipline
+Exactly one YOLO model is active at any time across multiple RTSP streams. Any
+model switch MUST gracefully restart inference workers without losing UI
+configuration in `config.yml`. Each stream is capped at 5 FPS (decode+inference)
+using frame skipping/backpressure to maintain real-time behavior.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+Rationale: Predictable latency and resource fairness under load.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### III. Explicit GPU Backend Contract and Fail-Fast Provisioning
+GPU backend is selected via `GPU_BACKEND ∈ {nvidia, amd, intel}`. `entrypoint.sh`
+MUST detect the backend, enable the minimal runtime stack (e.g., CUDA/TensorRT,
+ROCm/MIVisionX, OpenVINO), verify device access and print versions on startup.
+If unavailable or misconfigured, the container MUST exit with a clear, actionable
+error. No automatic backend fallback is permitted.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+Rationale: Clear failure modes and auditability of the execution environment.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### IV. Observability, Security, and Reliability by Default
+Structured JSON logging with configurable levels via env is REQUIRED. The app
+MUST expose health and Prometheus metrics, including per-stream FPS, latency,
+queue depth, and GPU utilization when available. Implement graceful shutdown,
+decoder/GPU cleanup, and a watchdog for stuck streams with exponential backoff.
+Security controls include: non-root execution, strict input validation, CSRF
+protection, rate-limiting on sensitive routes, and file I/O restricted to
+`config.yml` in a dedicated volume.
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Rationale: Operability and safety in unattended deployments.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+### V. Testing and CI/CD Integrity
+Unit tests MUST cover model management, RTSP validation, and MQTT/HTTP score
+publishing. Integration tests MUST include synthetic streams. Backend smoke
+tests MUST verify device discovery and a single-frame inference for each
+supported `GPU_BACKEND` on amd64. CI builds MUST target linux/amd64 only and
+publish amd64 manifests.
+
+Rationale: Confidence in correctness across critical surfaces and platforms.
+
+## Architecture & Execution Constraints
+
+- Container-only runtime on linux/amd64; no direct host execution.
+- Configuration contract via environment variables (e.g., `APP_PORT`,
+	`GPU_BACKEND`, `YOLO_MODEL`, `IMAGE_SIZE`, `MQTT_ENABLED`, `MQTT_HOST`,
+	`MQTT_PORT`, `MQTT_TOPIC`, `HTTP_STREAM_ENABLED`, `HTTP_STREAM_PATH`).
+- Streams and tunables are managed via the web UI and persisted to a single
+	`config.yml` mounted as a Docker volume.
+- Models: Select via `YOLO_MODEL` (e.g., `yolo11n`) and `IMAGE_SIZE` (e.g., 320).
+	Weights are fetched at container start and exported to ONNX inside the
+	container to unify execution on amd64 across backends. Only one model is ever
+	loaded at a time.
+- Streams: RTSP CRUD via UI, validated at save; per-stream enable/disable and
+	optional thresholds/zones if provided. Enforce 5 FPS cap with backpressure.
+- Web UI: Flask app factory with Blueprints for UI, REST, stream control,
+	health, and metrics. Dark, responsive UI optimized for mobile/touch.
+- APIs & outputs:
+	- MQTT (optional): If `MQTT_ENABLED=true`, publish numeric score per stream to
+		`MQTT_HOST:MQTT_PORT` under `MQTT_TOPIC` with sensible QoS/retain and
+		metadata: `timestamp, stream_id, score, confidence, model_id`.
+	- HTTP score streaming (optional): If `HTTP_STREAM_ENABLED=true`, serve a
+		real-time endpoint at `HTTP_STREAM_PATH` using SSE or WebSocket. Message
+		schema MUST include `timestamp, stream_id, score, confidence, model_id`.
+	- Provide a GET endpoint to fetch the latest score snapshot per stream.
+- Base image policy: Use `python:3.12-slim-trixie` for amd64; multi-stage builds
+	compile wheels in a builder stage; final stage contains no compilers.
+- Dockerfile standards: Non-root user, minimal OS packages, pinned base and
+	dependency versions, HEALTHCHECK for `/health`. Do not encode platform policy
+	in the Dockerfile (platform is enforced by build commands and CI).
+- Observability & reliability: JSON logs, health, Prometheus metrics, graceful
+	shutdown, watchdog auto-reconnect with exponential backoff.
+- Security & hardening: Non-root, input validation, CSRF, rate-limit sensitive
+	routes, restrict file I/O to `config.yml`, disallow arbitrary shell execution.
+- Docker & CI: Build with buildx and `--platform=linux/amd64`; publish ONLY
+	amd64 images/tags. Provide a docker-compose example with `platform:
+	linux/amd64` and GPU device exposure per backend on amd64 hosts.
+- Testing: Unit, integration with synthetic streams, backend smoke tests for
+	device discovery + single-frame inference per `GPU_BACKEND`.
+- Persistence & ports: Persist ONLY `/app/config/config.yml`; expose `APP_PORT`
+	for Flask server; document HTTP streaming path and any additional ports used.
+- Developer experience: Provide a Makefile for build, run, test, push; enforce
+	linux/amd64 flags and consistent tagging; include env var matrix and backend
+	support table in README plus Home Assistant examples.
+
+## Tooling & Evidence Requirements
+
+- During planning/implementation, agents MUST use web search to resolve latest
+	stable versions and installation guidance for CUDA/TensorRT (NVIDIA),
+	ROCm/MIVisionX (AMD), OpenVINO (Intel), ONNX Runtime, PyTorch/TorchAudio/
+	TorchVision (if used), FFmpeg/GStreamer components, and Flask/Docker best
+	practices.
+- Agents MUST ingest and reference official documentation pages before pinning
+	versions or commands.
+- Agents MUST record resolved versions and documentation URLs in
+	`artifacts/versions.md` and implement `--version` checks in `entrypoint.sh` to
+	emit versions at startup.
+- If conflicts or deprecations are discovered, agents MUST prefer the most
+	recent stable docs and explicitly document trade-offs in
+	`artifacts/decisions.md`.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+- This Constitution supersedes ad-hoc practices for this project. All changes to
+	architecture, CI, security posture, or runtime behavior MUST comply.
+- Amendments require a PR that:
+	1) proposes redlines, 2) explains bump type (MAJOR/MINOR/PATCH), 3) updates
+	dependent templates/docs as needed, 4) sets `Last Amended` to the PR date.
+- Versioning policy (semantic):
+	- MAJOR: Backward-incompatible governance/principle removals or redefinitions.
+	- MINOR: New principle/section added or materially expanded guidance.
+	- PATCH: Clarifications, wording, typo fixes, non-semantic refinements.
+- Compliance review: Every PR MUST include a "Constitution Check" confirming:
+	- Docker-only amd64, single-model/multi-stream at 5 FPS cap, and env/config
+		contract are preserved.
+	- GPU backend fail-fast behavior and no fallback are preserved.
+	- Observability (JSON logs, metrics, health) and security controls (CSRF,
+		rate-limit, input validation, non-root) are intact.
+	- CI enforces linux/amd64-only builds; Dockerfile standards are met.
+	- Tests and, where applicable, backend smoke tests are updated and passing.
+	- Tooling & Evidence artifacts (`artifacts/versions.md`, `decisions.md`) are
+		maintained and `entrypoint.sh` emits versions.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2025-10-17 | **Last Amended**: 2025-10-17

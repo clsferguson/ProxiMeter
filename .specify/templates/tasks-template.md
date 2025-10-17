@@ -45,9 +45,13 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Create project structure per implementation plan
-- [ ] T002 Initialize [language] project with [framework] dependencies
-- [ ] T003 [P] Configure linting and formatting tools
+- [ ] T001 Create project structure per implementation plan (src/, tests/, Makefile)
+- [ ] T002 Initialize Python 3.12 project; add Flask, Prometheus, MQTT, ONNX Runtime deps
+- [ ] T003 [P] Configure ruff/black, mypy; PEP8; pre-commit hooks
+- [ ] T004 Create Dockerfile (multi-stage, python:3.12-slim-trixie, non-root, HEALTHCHECK)
+- [ ] T005 Create docker-compose example with platform: linux/amd64 and GPU device exposure
+- [ ] T006 Create Makefile with amd64-enforcing targets (build, run, test, push)
+- [ ] T007 Create artifacts/versions.md and artifacts/decisions.md placeholders
 
 ---
 
@@ -59,12 +63,16 @@ description: "Task list template for feature implementation"
 
 Examples of foundational tasks (adjust based on your project):
 
-- [ ] T004 Setup database schema and migrations framework
-- [ ] T005 [P] Implement authentication/authorization framework
-- [ ] T006 [P] Setup API routing and middleware structure
-- [ ] T007 Create base models/entities that all stories depend on
-- [ ] T008 Configure error handling and logging infrastructure
-- [ ] T009 Setup environment configuration management
+- [ ] T008 [P] Implement Flask app factory; register Blueprints (ui, api, streams, health, metrics)
+- [ ] T009 [P] Implement structured JSON logging and error handling
+- [ ] T010 [P] Implement config.yml loader/saver with schema validation
+- [ ] T011 [P] Implement RTSP validator utility and unit tests
+- [ ] T012 [P] Implement metrics (Prometheus): per-stream FPS, latency, queue depth, GPU utilization
+- [ ] T013 [P] Implement entrypoint.sh provisioning for GPU_BACKEND with version checks and fail-fast
+- [ ] T014 [P] Implement ONNX export pipeline for YOLO_MODEL on startup; single-model manager
+- [ ] T015 [P] Implement inference worker scaffolding with frame queue and 5 FPS cap
+- [ ] T016 [P] Implement security middleware: CSRF, rate-limit sensitive routes, input validation
+- [ ] T017 [P] CI workflow to build amd64-only images via buildx and publish tags
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -80,17 +88,15 @@ Examples of foundational tasks (adjust based on your project):
 
 **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T010 [P] [US1] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T011 [P] [US1] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T018 [P] [US1] Contract test for HTTP score snapshot endpoint
+- [ ] T019 [P] [US1] Integration test using synthetic RTSP stream
 
 ### Implementation for User Story 1
 
-- [ ] T012 [P] [US1] Create [Entity1] model in src/models/[entity1].py
-- [ ] T013 [P] [US1] Create [Entity2] model in src/models/[entity2].py
-- [ ] T014 [US1] Implement [Service] in src/services/[service].py (depends on T012, T013)
-- [ ] T015 [US1] Implement [endpoint/feature] in src/[location]/[file].py
-- [ ] T016 [US1] Add validation and error handling
-- [ ] T017 [US1] Add logging for user story 1 operations
+- [ ] T020 [P] [US1] Implement latest score snapshot GET endpoint
+- [ ] T021 [P] [US1] Implement SSE/WebSocket streaming endpoint (transport TBD)
+- [ ] T022 [US1] Wire inference worker output to score store feeding endpoints
+- [ ] T023 [US1] Add logging, validation, and metrics for endpoints
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -104,15 +110,15 @@ Examples of foundational tasks (adjust based on your project):
 
 ### Tests for User Story 2 (OPTIONAL - only if tests requested) ⚠️
 
-- [ ] T018 [P] [US2] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T019 [P] [US2] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T024 [P] [US2] Contract test for RTSP CRUD API
+- [ ] T025 [P] [US2] Integration test validating 5 FPS cap under load
 
 ### Implementation for User Story 2
 
-- [ ] T020 [P] [US2] Create [Entity] model in src/models/[entity].py
-- [ ] T021 [US2] Implement [Service] in src/services/[service].py
-- [ ] T022 [US2] Implement [endpoint/feature] in src/[location]/[file].py
-- [ ] T023 [US2] Integrate with User Story 1 components (if needed)
+- [ ] T026 [P] [US2] Implement UI CRUD for RTSP streams mapped to config.yml
+- [ ] T027 [US2] Enforce per-stream enable/disable and thresholds/zones persistence
+- [ ] T028 [US2] Validate RTSP URLs on save; error surfacing in UI
+- [ ] T029 [US2] Integrate CRUD with inference worker lifecycle
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
@@ -126,14 +132,14 @@ Examples of foundational tasks (adjust based on your project):
 
 ### Tests for User Story 3 (OPTIONAL - only if tests requested) ⚠️
 
-- [ ] T024 [P] [US3] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T025 [P] [US3] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T030 [P] [US3] Contract test for MQTT publishing (schema, QoS/retain)
+- [ ] T031 [P] [US3] Integration test asserting <1s end-to-end delay
 
 ### Implementation for User Story 3
 
-- [ ] T026 [P] [US3] Create [Entity] model in src/models/[entity].py
-- [ ] T027 [US3] Implement [Service] in src/services/[service].py
-- [ ] T028 [US3] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T032 [P] [US3] Implement MQTT publisher with structured payload
+- [ ] T033 [US3] Configurable QoS/retain defaults; topic naming under MQTT_TOPIC
+- [ ] T034 [US3] Telemetry and error handling for broker disconnects
 
 **Checkpoint**: All user stories should now be independently functional
 
@@ -246,6 +252,3 @@ With multiple developers:
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence
-
-
-

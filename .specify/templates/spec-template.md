@@ -84,21 +84,30 @@
 
 ### Functional Requirements
 
-- **FR-001**: System MUST [specific capability, e.g., "allow users to create accounts"]
-- **FR-002**: System MUST [specific capability, e.g., "validate email addresses"]  
-- **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
-- **FR-004**: System MUST [data requirement, e.g., "persist user preferences"]
-- **FR-005**: System MUST [behavior, e.g., "log all security events"]
+- **FR-001**: Run exclusively in Docker on linux/amd64; include HEALTHCHECK /health
+- **FR-002**: Load a single YOLO model specified by YOLO_MODEL and IMAGE_SIZE; export to ONNX on startup
+- **FR-003**: Manage multiple RTSP streams with CRUD via web UI; validate at save
+- **FR-004**: Enforce max 5 FPS per stream using frame skipping/backpressure
+- **FR-005**: Provide Flask-based UI (app factory) and REST APIs via Blueprints
+- **FR-006**: Optional MQTT publishing of per-stream scores with required schema
+- **FR-007**: Optional HTTP score streaming (SSE or WebSocket) at HTTP_STREAM_PATH
+- **FR-008**: Provide GET endpoint for latest score snapshot per stream
+- **FR-009**: Persist only /app/config/config.yml; no model caches or artifacts persisted
+- **FR-010**: GPU backend provisioning via entrypoint.sh; fail fast on errors; print versions
+- **FR-011**: Structured JSON logging; Prometheus metrics for FPS, latency, queues, GPU utilization
+- **FR-012**: Security controls: non-root, input validation, CSRF, rate-limits; restrict file I/O
+- **FR-013**: CI builds and publishes linux/amd64 only images using buildx
 
 *Example of marking unclear requirements:*
 
-- **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
-- **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
+- **FR-014**: [NEEDS CLARIFICATION] Exact MQTT QoS/retain defaults and topic schema details
+- **FR-015**: [NEEDS CLARIFICATION] SSE vs WebSocket transport selection criteria and reconnection behavior
 
 ### Key Entities *(include if feature involves data)*
 
-- **[Entity 1]**: [What it represents, key attributes without implementation]
-- **[Entity 2]**: [What it represents, relationships to other entities]
+- **Stream**: id, name, rtsp_url, enabled, threshold, zones, last_score
+- **ModelConfig**: model_id (YOLO_MODEL), image_size, backend (GPU_BACKEND)
+- **Score**: timestamp, stream_id, score, confidence, model_id
 
 ## Success Criteria *(mandatory)*
 
@@ -109,8 +118,7 @@
 
 ### Measurable Outcomes
 
-- **SC-001**: [Measurable metric, e.g., "Users can complete account creation in under 2 minutes"]
-- **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
-- **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
-- **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
-
+- **SC-001**: Each stream maintains <= 5 FPS processing with p95 latency <= 200ms per frame
+- **SC-002**: Model switch completes and resumes streams in <= 5s without losing config.yml state
+- **SC-003**: MQTT/HTTP outputs deliver scores with < 1s end-to-end delay at p95 under 4 streams
+- **SC-004**: CI produces amd64-only image; container passes smoke test for selected GPU backend

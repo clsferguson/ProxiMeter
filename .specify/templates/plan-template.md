@@ -31,7 +31,18 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- Docker-only runtime on linux/amd64; no host execution paths
+- Single active YOLO model; multi-RTSP with enforced 5 FPS per stream
+- Env contract honored: APP_PORT, GPU_BACKEND, YOLO_MODEL, IMAGE_SIZE,
+  MQTT_ENABLED, MQTT_HOST, MQTT_PORT, MQTT_TOPIC, HTTP_STREAM_ENABLED,
+  HTTP_STREAM_PATH
+- Persist ONLY /app/config/config.yml via volume; no model caches/artifacts
+- GPU backend provisioning is fail-fast (no fallback) and versions emitted
+- Observability: JSON logs, /health, Prometheus metrics present
+- Security: non-root, input validation, CSRF, rate-limits; file I/O restricted
+- CI/build: buildx with --platform=linux/amd64; healthcheck in image
+- Tooling evidence: artifacts/versions.md updated; decisions recorded; entrypoint
+  prints runtime stack versions
 
 ## Project Structure
 
@@ -102,4 +113,3 @@ directories captured above]
 |-----------|------------|-------------------------------------|
 | [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
 | [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
-
