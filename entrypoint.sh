@@ -23,5 +23,4 @@ echo "Starting Uvicorn on 0.0.0.0:${APP_PORT}"
 # Start the ASGI server
 exec uvicorn src.app.wsgi:app \
     --host 0.0.0.0 \
-    --port "${APP_PORT}" \
-    --log-config /dev/null
+    --port "${APP_PORT}"
