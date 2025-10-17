@@ -1,0 +1,138 @@
+openapi: 3.0.3
+info:
+  title: ProxiMeter Streams API
+  version: 0.1.0
+servers:
+  - url: http://localhost:{port}
+    variables:
+      port:
+        default: "8000"
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+  /api/streams:
+    get:
+      summary: List streams
+      responses:
+        '200':
+          description: List of streams
+    post:
+      summary: Create stream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewStream'
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Validation error
+  /api/streams/{id}:
+    patch:
+      summary: Edit stream
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditStream'
+      responses:
+        '200':
+          description: Updated
+        '404':
+          description: Not found
+    delete:
+      summary: Delete stream
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
+  /api/streams/reorder:
+    post:
+      summary: Reorder streams
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                order:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Order updated
+        '400':
+          description: Invalid order
+  /play/{id}.mjpg:
+    get:
+      summary: MJPEG stream for playback
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Multipart MJPEG stream
+        '404':
+          description: Not found
+components:
+  schemas:
+    Stream:
+      type: object
+      required: [id, name, rtsp_url, created_at, order, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        rtsp_url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+        order:
+          type: integer
+        status:
+          type: string
+          enum: [Active, Inactive]
+    NewStream:
+      type: object
+      required: [name, rtsp_url]
+      properties:
+        name:
+          type: string
+        rtsp_url:
+          type: string
+    EditStream:
+      type: object
+      properties:
+        name:
+          type: string
+        rtsp_url:
+          type: string

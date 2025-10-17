@@ -61,6 +61,11 @@ As a user, I no longer see the previous counter functionality. The landing page 
 - Deleting the last stream → landing shows empty state with only "Add stream" button.
 - Reordering when only one or zero streams exist → reorder handle disabled.
 - Large list (e.g., 100 streams) → landing remains responsive; scrolling allowed; layout stays equal-width.
+- Mid-playback failure behavior → backend terminates the MJPEG stream gracefully and updates the stream `status` to `Inactive`; the UI must present a clear error banner with a link back to the landing page. The status change persists to `config.yml` and will be reflected on the landing list. [Coverage]
+- Reorder API behavior with ≤1 streams → server accepts reorder requests but performs a no-op and returns success; order remains unchanged. [Coverage]
+- Duplicate name normalization → server trims leading/trailing whitespace and compares names case-insensitively when enforcing uniqueness; error copy instructs to choose a unique name. [Clarity]
+- Credentials masking → when returning `rtsp_url` in API responses or logs, username/password are masked (e.g., `rtsp://***:***@host/...`). Stored value in `config.yml` remains plaintext as documented. [Security]
+- Pagination explicitness → list endpoints return the full set of streams; pagination is out of scope for this feature. [Clarity]
 
 ## Requirements (mandatory)
 
@@ -83,6 +88,45 @@ As a user, I no longer see the previous counter functionality. The landing page 
 - FR-015: Provide an Edit Stream function accessible via an edit (pencil) control on each stream list item. The edit form allows changing Name and RTSP URL with the same validations; it also provides Delete with confirmation. Changes persist immediately and update the list.
 - FR-016: Stream list items display primarily the stream Name, with an inline move (hamburger) handle and an edit pencil control; visual layout keeps action targets accessible and consistent.
 - FR-017: Update the README to reflect current functionality (RTSP streams, landing UI, removal of counter), basic usage, and security warning about plaintext credentials in config.
+- FR-018: On runtime playback failures, the system updates the affected stream's `status` to `Inactive` and ensures the UI can detect the failure within the session (e.g., via stream termination and error banner) without crashing the application. The status update is persisted. [Extends FR-012]
+- FR-019: The reorder operation is idempotent and safe when the submitted order is identical or when there are ≤1 streams; the API returns success and makes no changes. Invalid orders (missing/duplicate IDs) are rejected with a clear validation error. [Clarifies FR-006]
+- FR-020: Standardize error responses across endpoints with JSON shape `{ code: string, message: string, details?: object }`; use domain codes such as `INVALID_RTSP_URL`, `DUPLICATE_NAME`, `INVALID_ORDER`, `NOT_FOUND`. Include examples in API docs.
+- FR-021: Health endpoint responds `200` with JSON body `{ status: "ok" }` and no dynamic fields; used for container HEALTHCHECK.
+- FR-022: Create/Edit semantics when RTSP is unreachable: the resource is saved with `status=Inactive`; response body includes the current `status` and an advisory message in `details` explaining connectivity could not be confirmed.
+- FR-023: Playback endpoint guarantees server-side visual update rate ≤5 FPS. Response uses `Content-Type: multipart/x-mixed-replace; boundary=frame` with each part `Content-Type: image/jpeg`. Connection ends gracefully on error or stop; appropriate cache-control headers are sent.
+- FR-024: Edit uses `PATCH /api/streams/{id}` with partial fields `name`, `rtsp_url`; unchanged fields are not required and remain intact. Response returns the updated resource. Validation order: input → uniqueness/format → optional probe → persist.
+- FR-025: Provide request/response examples in the API documentation for Create, Edit, Delete, Reorder, List, and Playback endpoints, including error examples for common failures.
+- FR-026: In API responses, any `rtsp_url` values must mask embedded credentials (username/password) while preserving host/path for operability documentation.
+
+### UX Design Details
+
+- Forms (Add/Edit)
+	- Fields: "Name" (required, 1–50 chars) and "RTSP URL" (required, must start with rtsp:// and include non-empty host)
+	- Labels: Visible labels above inputs; required fields marked with an asterisk
+	- Error messages: Inline, placed directly beneath the field in error, concise copy: 
+		- Name: "Enter 1–50 characters."; on duplicate (case-insensitive, trimmed): "Choose a unique name."
+		- RTSP URL: "Enter a valid RTSP URL (rtsp://host/...)."
+	- Controls: Primary "Save" (Add: "Add stream"; Edit: "Save changes"), secondary "Cancel" returning to landing without saving
+	- Security notice: Below RTSP URL input, display: "Security note: RTSP URLs with credentials are stored in plaintext in config/config.yml. Use on trusted LAN only. Do not expose to WAN."
+
+- Back/Return control (Stream view)
+	- Placement: Top-left persistent button labeled "Back to streams"
+	- Behavior: Always visible; returns to landing; keyboard accessible (Tab focusable)
+
+- Delete confirmation (List/Edit)
+	- Modal dialog with title "Delete stream?"
+	- Body: "Are you sure you want to delete ‘<Name>’? This cannot be undone."
+	- Buttons: Destructive primary "Delete", secondary "Cancel"
+	- Focus: Dialog traps focus; Esc cancels; on close, focus returns to the Delete trigger; Enter confirms only when the Delete button is focused
+
+- Accessibility
+	- Focus order: Header → primary action → stream list → footer; visible focus outlines
+	- Reorder via keyboard: Drag handle supports keyboard — Space to pick up, Arrow Up/Down to move, Enter to drop; announce new position via ARIA live region (e.g., "Moved ProxiCam to position 2")
+	- Roles/labels: List has role="list"; items role="listitem"; drag handle aria-label="Drag to reorder"; icons have aria-labels
+	- Contrast: Meet WCAG 2.1 AA for text and interactive elements
+
+- Failure banner (Playback)
+	- Display a top-of-content error banner with message and a link "Back to streams"; banner does not block navigation
 
 ### Key Entities (include if feature involves data)
 
@@ -100,3 +144,8 @@ As a user, I no longer see the previous counter functionality. The landing page 
 - SC-006: On desktop widths ≥1024 px, stream buttons in the same row differ in width by no more than 2 pixels.
 - SC-007: Header animations complete within 700 ms and do not block user input.
 - SC-008: Editing a stream’s details updates storage and the landing list within 1 second (p95), with validations enforced and confirmation required for delete.
+
+## Non-Functional Requirements
+
+- NFR-001: Apply lightweight rate limiting to mutating routes (e.g., per-client 5 requests/second burst 10) to guard against accidental abuse on LAN.
+- NFR-002: YAML persistence uses atomic writes (write to temp file then rename) to avoid partial writes and ensures ordering is preserved across crashes.
