@@ -50,13 +50,22 @@ jobs:
 
       - name: Run container for smoke test
         run: |
-          docker run -d --rm -p 8000:8000 --name proximeter test-image:local
+          docker run -d -p 8000:8000 --name proximeter test-image:local
           echo "container-started" > container.txt
+          sleep 2
+          echo "Container logs after startup:"
+          docker logs proximeter || true
 
       - name: Wait for health
         run: |
           set -e
           for i in {1..30}; do
+            # Check if container is still running
+            if ! docker ps | grep -q proximeter; then
+              echo "✗ Container exited unexpectedly"
+              docker logs proximeter || true
+              exit 1
+            fi
             code=$(curl -s -o /tmp/h.txt -w "%{http_code}" http://localhost:8000/health || true)
             body=$(cat /tmp/h.txt || true)
             if [ "$code" = "200" ] && echo "$body" | grep -q '"status":"ok"'; then

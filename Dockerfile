@@ -29,12 +29,14 @@ RUN useradd -m -u 10001 appuser
 # Copy app and entrypoint
 COPY src ./src
 COPY entrypoint.sh ./entrypoint.sh
+COPY config/config.yml ./config/config.yml
 
 # Make entrypoint executable
 RUN chmod +x /app/entrypoint.sh
 
-# Config directory (persist via volume)
-RUN mkdir -p /app/config && chown -R appuser:appuser /app
+# Set ownership
+RUN chown -R appuser:appuser /app
+
 VOLUME ["/app/config"]
 
 USER appuser
