@@ -76,6 +76,13 @@ Acceptance Scenarios:
 - FR-009: Do not require authentication or external services for this MVP.
 - FR-010: Keep all specification and UI language neutral and accessible; avoid implementation‑specific details in user‑facing documentation.
 
+#### CI/CD (GitHub Actions) Requirements
+
+- FR-011: Provide a continuous integration workflow that runs automatically on pull requests and pushes to the default branch and performs: (a) container image build for linux/amd64, and (b) a smoke test that runs the container and verifies readiness via an HTTP GET to `/health`.
+- FR-012: The CI workflow must not require GPUs or external services; it must execute successfully on standard hosted runners.
+- FR-013: The CI workflow must fail if the container fails to build, fails to start, or `/health` does not return HTTP 200 within a reasonable startup window.
+- FR-014: The CI workflow must report status on pull requests and expose basic logs sufficient to diagnose typical build/startup failures.
+
 ### Key Entities (data)
 
 - Configuration: YAML file with a single key `counter` (integer ≥ 0). Additional keys may be added in future versions.
@@ -89,3 +96,6 @@ Acceptance Scenarios:
 - SC-003: After incrementing the counter and restarting the application (or container), the first page load shows the last stored value 100% of the time under normal local conditions.
 - SC-004: Health endpoint responds with HTTP 200 in under 200 ms on a local machine when the service is ready.
 - SC-005: A new contributor can follow the README to build and run the container locally in under 10 minutes without prior project knowledge.
+- SC-006: On pushes and pull requests to the default branch, the CI workflow runs automatically and completes in ≤ 5 minutes under typical hosted runner conditions.
+- SC-007: The CI smoke test fails if `/health` is not reachable or does not return HTTP 200 within 30 seconds of container startup.
+- SC-008: The CI workflow builds a linux/amd64 image successfully on standard hosted runners without GPU access for 100% of runs under normal conditions.
