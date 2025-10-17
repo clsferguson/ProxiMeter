@@ -28,10 +28,10 @@ Path Conventions (from plan.md)
 
 Purpose: Create the repository structure and core scaffolding to enable development.
 
-- [ ] T001 Create project directories: `src/app/`, `src/app/templates/`, `src/app/static/`, `config/`, `.github/workflows/`
-- [ ] T002 Create `requirements.txt` with pinned deps: Flask, PyYAML, Gunicorn at repo root `requirements.txt`
-- [ ] T003 [P] Create `.dockerignore` at repo root (exclude: `.git`, `__pycache__/`, `.venv/`, `config/*.yml` except mounted volume)
-- [ ] T004 [P] Create `.gitignore` at repo root (exclude Python artifacts and `config/config.yml`)
+- [X] T001 Create project directories: `src/app/`, `src/app/templates/`, `src/app/static/`, `config/`, `.github/workflows/`
+- [X] T002 Create `requirements.txt` with pinned deps: Flask, PyYAML, Gunicorn at repo root `requirements.txt`
+- [X] T003 [P] Create `.dockerignore` at repo root (exclude: `.git`, `__pycache__/`, `.venv/`, `config/*.yml` except mounted volume)
+- [X] T004 [P] Create `.gitignore` at repo root (exclude Python artifacts and `config/config.yml`)
 
 ---
 
@@ -39,10 +39,10 @@ Purpose: Create the repository structure and core scaffolding to enable developm
 
 Purpose: Core application scaffolding required before any user story work.
 
-- [ ] T005 [P] Implement Flask app factory in `src/app/__init__.py` (function `create_app()`; configure Jinja, static folder)
-- [ ] T006 [P] Add WSGI entrypoint in `src/app/wsgi.py` exposing `app = create_app()`
-- [ ] T007 [P] Implement YAML config IO in `src/app/config_io.py` (`load_counter()`, `save_counter(value)`, default 0, max 2147483647, create `config/config.yml` if missing)
-- [ ] T008 Create routes module scaffold `src/app/routes.py` with a `Blueprint('main', __name__)` and placeholder registration function `register_blueprint(app)`
+- [X] T005 [P] Implement Flask app factory in `src/app/__init__.py` (function `create_app()`; configure Jinja, static folder)
+- [X] T006 [P] Add WSGI entrypoint in `src/app/wsgi.py` exposing `app = create_app()`
+- [X] T007 [P] Implement YAML config IO in `src/app/config_io.py` (`load_counter()`, `save_counter(value)`, default 0, max 2147483647, create `config/config.yml` if missing)
+- [X] T008 Create routes module scaffold `src/app/routes.py` with a `Blueprint('main', __name__)` and placeholder registration function `register_blueprint(app)`
 
 Checkpoint: Foundation ready – user story implementation can begin.
 
@@ -56,10 +56,10 @@ Independent Test: Load `/`, click "Increment", refresh; the value remains increm
 
 Implementation
 
-- [ ] T009 [P] [US1] Create dark theme with purple highlights stylesheet `src/app/static/styles.css`
-- [ ] T010 [US1] Create `src/app/templates/index.html` (hello message, current counter value, increment button, embedded JS `fetch('/api/counter', {method:'POST'})` to update the DOM; show messages for cap reached/write errors). Ensure keyboard accessibility (Enter/Space activates button) and visible 2px focus outline (#7C3AED).
-- [ ] T011 [US1] Implement routes in `src/app/routes.py`: `GET /` render `index.html` with current value; `GET /api/counter` return JSON `{counter}`; `POST /api/counter` increment with cap, persist via `config_io`
-- [ ] T012 [P] [US1] Register routes blueprint in app factory (`src/app/__init__.py`): import `register_blueprint` and call from `create_app()`
+- [X] T009 [P] [US1] Create dark theme with purple highlights stylesheet `src/app/static/styles.css`
+- [X] T010 [US1] Create `src/app/templates/index.html` (hello message, current counter value, increment button, embedded JS `fetch('/api/counter', {method:'POST'})` to update the DOM; show messages for cap reached/write errors). Ensure keyboard accessibility (Enter/Space activates button) and visible 2px focus outline (#7C3AED).
+- [X] T011 [US1] Implement routes in `src/app/routes.py`: `GET /` render `index.html` with current value; `GET /api/counter` return JSON `{counter}`; `POST /api/counter` increment with cap, persist via `config_io`
+- [X] T012 [P] [US1] Register routes blueprint in app factory (`src/app/__init__.py`): import `register_blueprint` and call from `create_app()`
 
 Checkpoint: User Story 1 is fully functional and testable independently.
 
@@ -73,9 +73,9 @@ Independent Test: Build the image (linux/amd64), run the container, access `/` a
 
 Implementation
 
-- [ ] T013 [US2] Implement health endpoint in `src/app/routes.py`: `GET /health` → return 200 "ok"
-- [ ] T014 [P] [US2] Create `Dockerfile` at repo root: base `python:3.12-slim-trixie`, copy app, `pip install -r requirements.txt`, non-root user, expose 8000, `HEALTHCHECK` hitting `/health`, `CMD ["gunicorn","-w","2","-b","0.0.0.0:8000","src.app.wsgi:app"]`
-- [ ] T015 [P] [US2] Add CI workflow `.github/workflows/ci.yml` to build linux/amd64 image and smoke-test `/health` by running the container. Export `CI_DRY_RUN=true`; poll `http://localhost:8000/health` for up to 30s (1s interval) and fail if not `200 ok`. Optionally validate `GET /metrics` returns 200.
+- [X] T013 [US2] Implement health endpoint in `src/app/routes.py`: `GET /health` → return 200 "ok"
+- [X] T014 [P] [US2] Create `Dockerfile` at repo root: base `python:3.12-slim-trixie`, copy app, `pip install -r requirements.txt`, non-root user, expose 8000, `HEALTHCHECK` hitting `/health`, `CMD ["gunicorn","-w","2","-b","0.0.0.0:8000","src.app.wsgi:app"]`
+- [X] T015 [P] [US2] Add CI workflow `.github/workflows/ci.yml` to build linux/amd64 image and smoke-test `/health` by running the container. Export `CI_DRY_RUN=true`; poll `http://localhost:8000/health` for up to 30s (1s interval) and fail if not `200 ok`. Optionally validate `GET /metrics` returns 200.
 
 Checkpoint: User Story 2 is independently verifiable via container build/run and health check.
 
@@ -89,8 +89,8 @@ Independent Test: README explains build/run with volume for `config.yml`; LICENS
 
 Implementation
 
-- [ ] T016 [P] [US3] Create `README.md` at repo root with project description, docker build/run commands, and persistence notes (map host `./config` to `/app/config`). The README must include, at minimum, a friendly LAN-only/no-auth safety note and brief mentions of `/health` and `/metrics` endpoints per constitution, while keeping tone friendly.
-- [ ] T017 [P] [US3] Create `LICENSE` at repo root with MIT License (© 2025 clsferguson)
+ - [X] T016 [P] [US3] Create `README.md` at repo root with project description, docker build/run commands, and persistence notes (map host `./config` to `/app/config`). The README must include, at minimum, a friendly LAN-only/no-auth safety note and brief mentions of `/health` and `/metrics` endpoints per constitution, while keeping tone friendly.
+ - [X] T017 [P] [US3] Create `LICENSE` at repo root with MIT License (© 2025 clsferguson)
 
 Checkpoint: User Story 3 is complete.
 

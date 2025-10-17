@@ -1,0 +1,9 @@
+# Runtime dependencies (pinned)
+Flask==3.0.3
+Jinja2==3.1.4
+PyYAML==6.0.2
+gunicorn==21.2.0
+prometheus-client==0.20.0
+
+# Optional/testing (not required for MVP)
+# pytest==8.2.0
