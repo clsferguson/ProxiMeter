@@ -13,22 +13,22 @@ Notes
 
 ## Phase 1: Setup
 
-- [ ] T001 Update dependencies for FastAPI stack in `requirements.txt` (add fastapi, uvicorn, starlette, pydantic>=2, opencv-python-headless, python-multipart; keep prometheus-client; remove Flask; if keeping Gunicorn, use uvicorn.workers.UvicornWorker)
-- [ ] T002 Create FastAPI ASGI app skeleton in `src/app/wsgi.py` (instantiate FastAPI app; placeholder routers; WSGI Flask removed)
-- [ ] T003 Create API package init `src/app/api/__init__.py`
-- [ ] T004 Create REST router for health `src/app/api/health.py`
-- [ ] T005 Create REST router for streams `src/app/api/streams.py`
-- [ ] T006 Create UI views module for templates `src/app/ui/views.py`
-- [ ] T007 Create Stream domain model `src/app/models/stream.py`
-- [ ] T008 Create streams service module `src/app/services/streams_service.py`
-- [ ] T009 Create RTSP utilities (playback generator helpers) `src/app/utils/rtsp.py`
-- [ ] T010 Create API error schema/types `src/app/api/errors.py`
-- [ ] T011 Initialize config file with empty list if missing `config/config.yml`
-- [ ] T012 [P] Create base layout template with header container `src/app/templates/base.html`
-- [ ] T013 [P] Update styles for header animation and equal-width grid `src/app/static/styles.css`
-- [ ] T014 [P] Add client JS for animations, reorder, delete confirm `src/app/static/app.js`
-- [ ] T015 Update JSON logging wiring for FastAPI requests `src/app/logging_config.py` (one-line JSON: time, level, msg, request_id, method, path, status, duration_ms, client_ip, user_agent)
-- [ ] T016 Configure ASGI startup (host/port via `APP_PORT`, default 8000) in `Dockerfile` (bind 0.0.0.0:APP_PORT; log effective port)
+- [X] T001 Update dependencies for FastAPI stack in `requirements.txt` (add fastapi, uvicorn, starlette, pydantic>=2, opencv-python-headless, python-multipart; keep prometheus-client; remove Flask; if keeping Gunicorn, use uvicorn.workers.UvicornWorker)
+- [X] T002 Create FastAPI ASGI app skeleton in `src/app/wsgi.py` (instantiate FastAPI app; placeholder routers; WSGI Flask removed)
+- [X] T003 Create API package init `src/app/api/__init__.py`
+- [X] T004 Create REST router for health `src/app/api/health.py`
+- [X] T005 Create REST router for streams `src/app/api/streams.py`
+- [X] T006 Create UI views module for templates `src/app/ui/views.py`
+- [X] T007 Create Stream domain model `src/app/models/stream.py`
+- [X] T008 Create streams service module `src/app/services/streams_service.py`
+- [X] T009 Create RTSP utilities (playback generator helpers) `src/app/utils/rtsp.py`
+- [X] T010 Create API error schema/types `src/app/api/errors.py`
+- [X] T011 Initialize config file with empty list if missing `config/config.yml`
+- [X] T012 [P] Create base layout template with header container `src/app/templates/base.html`
+- [X] T013 [P] Update styles for header animation and equal-width grid `src/app/static/styles.css`
+- [X] T014 [P] Add client JS for animations, reorder, delete confirm `src/app/static/app.js`
+- [X] T015 Update JSON logging wiring for FastAPI requests `src/app/logging_config.py` (one-line JSON: time, level, msg, request_id, method, path, status, duration_ms, client_ip, user_agent)
+- [X] T016 Configure ASGI startup (host/port via `APP_PORT`, default 8000) in `Dockerfile` (bind 0.0.0.0:APP_PORT; log effective port)
 
 ## Phase 2: Foundational
 

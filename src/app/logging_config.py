@@ -57,11 +57,7 @@ def configure_logging() -> None:
     handler.setFormatter(JSONFormatter())
     root_logger.addHandler(handler)
 
-    # Configure Flask logger
-    flask_logger = logging.getLogger("flask")
-    flask_logger.setLevel(log_level)
-
-    # Configure Gunicorn loggers if present
-    for logger_name in ["gunicorn.error", "gunicorn.access"]:
+    # Configure FastAPI/Uvicorn loggers
+    for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"]:
         logger = logging.getLogger(logger_name)
         logger.setLevel(log_level)
