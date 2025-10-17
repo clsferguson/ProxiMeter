@@ -93,10 +93,11 @@
 - **FR-007**: Optional HTTP score streaming (SSE or WebSocket) at HTTP_STREAM_PATH
 - **FR-008**: Provide GET endpoint for latest score snapshot per stream
 - **FR-009**: Persist only /app/config/config.yml; no model caches or artifacts persisted
-- **FR-010**: GPU backend provisioning via entrypoint.sh; fail fast on errors; print versions
+- **FR-010**: GPU backend provisioning via entrypoint.sh; fail fast on errors; print versions; support CI dry-run via `CI_DRY_RUN=true` to skip device access on CPU-only runners
 - **FR-011**: Structured JSON logging; Prometheus metrics for FPS, latency, queues, GPU utilization
 - **FR-012**: Security controls: non-root, input validation, CSRF, rate-limits; restrict file I/O
-- **FR-013**: CI builds and publishes linux/amd64 only images using buildx
+- **FR-013**: CI builds and publishes linux/amd64 only images using buildx on GitHub CPU-only runners; CI MUST NOT require GPU devices
+- **FR-016**: Off-CI GPU smoke tests (manual or self-hosted runner) validate device discovery + single-frame inference per supported GPU_BACKEND
 
 *Example of marking unclear requirements:*
 
@@ -121,4 +122,5 @@
 - **SC-001**: Each stream maintains <= 5 FPS processing with p95 latency <= 200ms per frame
 - **SC-002**: Model switch completes and resumes streams in <= 5s without losing config.yml state
 - **SC-003**: MQTT/HTTP outputs deliver scores with < 1s end-to-end delay at p95 under 4 streams
-- **SC-004**: CI produces amd64-only image; container passes smoke test for selected GPU backend
+- **SC-004**: CI produces amd64-only image and passes CPU-only dry-run startup (/health) with CI_DRY_RUN=true
+- **SC-005**: Off-CI GPU smoke test completes device discovery + single-frame inference for selected GPU backend

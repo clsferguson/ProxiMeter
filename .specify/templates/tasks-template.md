@@ -72,7 +72,8 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] T014 [P] Implement ONNX export pipeline for YOLO_MODEL on startup; single-model manager
 - [ ] T015 [P] Implement inference worker scaffolding with frame queue and 5 FPS cap
 - [ ] T016 [P] Implement security middleware: CSRF, rate-limit sensitive routes, input validation
-- [ ] T017 [P] CI workflow to build amd64-only images via buildx and publish tags
+- [ ] T017 [P] CI workflow to build amd64-only images via buildx and publish tags (GitHub runners)
+- [ ] T017a [P] Add CI_DRY_RUN=true path to start app without GPU and validate /health on CPU-only CI
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 

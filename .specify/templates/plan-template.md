@@ -41,6 +41,11 @@
 - Observability: JSON logs, /health, Prometheus metrics present
 - Security: non-root, input validation, CSRF, rate-limits; file I/O restricted
 - CI/build: buildx with --platform=linux/amd64; healthcheck in image
+- CI/build: buildx with --platform=linux/amd64; healthcheck in image
+- CI runners: GitHub-hosted CPU-only; pipeline MUST NOT require GPU devices or drivers
+- CI dry-run: set CI_DRY_RUN=true to bypass GPU checks while verifying startup and /health
+- Tests in CI: CPU-only with synthetic inputs; avoid large model downloads unless cached
+- GPU smoke tests: off-CI only (manual or self-hosted GPU runner) and documented runbook
 - Tooling evidence: artifacts/versions.md updated; decisions recorded; entrypoint
   prints runtime stack versions
 

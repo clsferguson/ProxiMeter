@@ -1,21 +1,24 @@
 <!--
 Sync Impact Report
-- Version change: none → 1.0.0
-- Modified principles: N/A (initial ratification)
-- Added sections: "Architecture & Execution Constraints", "Tooling & Evidence Requirements"
+- Version change: 1.0.0 → 1.1.0
+- Modified principles:
+  - V. Testing and CI/CD Integrity → V. Testing and CI/CD Integrity (clarified GPU limits; CI dry-run)
+- Added sections:
+  - VI. CPU-only CI Policy (GitHub Runners)
 - Removed sections: None
 - Templates requiring updates:
-	- .specify/templates/plan-template.md ✅ updated
-	- .specify/templates/spec-template.md ✅ updated
-	- .specify/templates/tasks-template.md ✅ updated
+	- .specify/templates/plan-template.md ✅ updated (CI on CPU-only runners; optional off-CI GPU tests)
+	- .specify/templates/spec-template.md ✅ updated (FR/SC reflect CI dry-run; GPU tests optional/off-CI)
+	- .specify/templates/tasks-template.md ✅ updated (CI dry-run validation task)
 	- .specify/templates/commands/* ⚠ pending (directory absent)
-	- README.md ⚠ pending (add env var matrix, backend support table, docker-compose example)
+	- README.md ⚠ pending (document CI_DRY_RUN env and GPU test policy)
 	- artifacts/versions.md ⚠ pending (create and keep current)
-	- artifacts/decisions.md ⚠ pending (create and record trade-offs)
+	- artifacts/decisions.md ⚠ pending (create and record trade-offs, include GPU test policy/limitations)
 - Follow-up TODOs:
 	- Create artifacts/versions.md and artifacts/decisions.md per Tooling policy
-	- Add README with examples for MQTT and HTTP SSE consumers
+	- Add README with env var matrix, backend support table, MQTT/SSE examples, and CI_DRY_RUN usage
 	- Add docker-compose example with platform: linux/amd64 and GPU device exposure
+	- If desired later, define an optional off-CI/manual GPU test runbook or configure a self-hosted GPU runner
 -->
 
 # Multi-RTSP Person Detection (Docker-only, amd64) Constitution
@@ -61,12 +64,32 @@ Rationale: Operability and safety in unattended deployments.
 
 ### V. Testing and CI/CD Integrity
 Unit tests MUST cover model management, RTSP validation, and MQTT/HTTP score
-publishing. Integration tests MUST include synthetic streams. Backend smoke
-tests MUST verify device discovery and a single-frame inference for each
-supported `GPU_BACKEND` on amd64. CI builds MUST target linux/amd64 only and
-publish amd64 manifests.
-
+publishing. Integration tests MUST include synthetic streams that do not require
+GPU hardware. GPU-dependent tests MUST NOT be required by CI or normal project
+workflows; if a GPU-capable environment is available out-of-band, optional
+backend smoke tests MAY verify device discovery and a single-frame inference for
+each supported `GPU_BACKEND` on amd64. CI builds MUST target linux/amd64 only,
+run on GitHub-hosted CPU-only runners, and publish amd64 manifests. CI MUST NOT
+require GPU devices or driver availability to succeed.
+ 
 Rationale: Confidence in correctness across critical surfaces and platforms.
+### VI. CPU-only CI Policy (GitHub Runners)
+All automated builds and unit/integration tests run on GitHub-hosted CPU-only
+runners. The pipeline MUST:
+
+- Avoid any steps that require GPU devices, kernel drivers, or device-specific
+	compilation.
+- Provide a CI dry-run mode via `CI_DRY_RUN=true` causing `entrypoint.sh` to
+	skip device access and emit version information only; application MUST start
+	sufficiently to serve `/health` and basic metrics in stub mode.
+- Use synthetic inputs for tests; do not download large model weights during CI
+	unless cached and strictly necessary.
+- Clearly mark GPU smoke tests as "off-CI" and document a manual or self-hosted
+	GPU runner process; failures MUST NOT block CPU-only CI but MUST be tracked in
+	`artifacts/decisions.md`.
+
+Rationale: Ensure reliable CI on standard runners while preserving production
+GPU guarantees through documented, off-CI validation.
 
 ## Architecture & Execution Constraints
 
@@ -104,8 +127,13 @@ Rationale: Confidence in correctness across critical surfaces and platforms.
 - Docker & CI: Build with buildx and `--platform=linux/amd64`; publish ONLY
 	amd64 images/tags. Provide a docker-compose example with `platform:
 	linux/amd64` and GPU device exposure per backend on amd64 hosts.
-- Testing: Unit, integration with synthetic streams, backend smoke tests for
-	device discovery + single-frame inference per `GPU_BACKEND`.
+- CI runners: Assume GitHub-hosted CPU-only runners. The image and tests MUST
+	succeed without GPU devices present. Support `CI_DRY_RUN=true` to bypass GPU
+	checks while still validating startup, `/health`, configuration loading, and
+	logging/metrics wiring.
+- Testing: Unit, integration with synthetic streams. Optional off-CI GPU smoke
+	tests MAY be run (if hardware available) to validate device discovery and a
+	single-frame inference per `GPU_BACKEND`.
 - Persistence & ports: Persist ONLY `/app/config/config.yml`; expose `APP_PORT`
 	for Flask server; document HTTP streaming path and any additional ports used.
 - Developer experience: Provide a Makefile for build, run, test, push; enforce
@@ -146,8 +174,10 @@ Rationale: Confidence in correctness across critical surfaces and platforms.
 	- Observability (JSON logs, metrics, health) and security controls (CSRF,
 		rate-limit, input validation, non-root) are intact.
 	- CI enforces linux/amd64-only builds; Dockerfile standards are met.
-	- Tests and, where applicable, backend smoke tests are updated and passing.
+	- Tests are updated and passing on CPU-only CI. If optional GPU smoke tests are
+		performed out-of-band, record outcomes; if not available, record the
+		limitation in `artifacts/decisions.md`.
 	- Tooling & Evidence artifacts (`artifacts/versions.md`, `decisions.md`) are
 		maintained and `entrypoint.sh` emits versions.
 
-**Version**: 1.0.0 | **Ratified**: 2025-10-17 | **Last Amended**: 2025-10-17
+**Version**: 1.1.0 | **Ratified**: 2025-10-17 | **Last Amended**: 2025-10-17
