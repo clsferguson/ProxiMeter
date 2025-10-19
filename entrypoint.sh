@@ -24,6 +24,6 @@ echo "Starting Uvicorn on 0.0.0.0:${APP_PORT}"
 export PYTHONPATH=/app/src:${PYTHONPATH}
 
 # Start the ASGI server
-exec uvicorn app.wsgi:app \
+exec uvicorn app.main:app \
     --host 0.0.0.0 \
     --port "${APP_PORT}"
