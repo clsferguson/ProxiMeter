@@ -1,8 +1,11 @@
 """FastAPI ASGI application entry point."""
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.exceptions import RequestValidationError
+from fastapi import Request
+from fastapi.responses import JSONResponse  # Not starlette.responses
+
 import logging
 from pathlib import Path
 
@@ -43,7 +46,8 @@ app.add_middleware(RequestIDMiddleware)
 app.add_middleware(RateLimitMiddleware, requests_per_second=5.0, burst=10)
 
 # Register exception handlers
-app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler) 
+app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
 
 # Include routers
