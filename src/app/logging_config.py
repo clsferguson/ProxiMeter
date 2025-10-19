@@ -34,8 +34,8 @@ class JSONFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Format a log record as a JSON string with credentials redacted."""
-        # Redact credentials from the message
-        message = self.formatMessage(record)
+        # Get the formatted message (creates it from msg % args)
+        message = record.getMessage()  # ← Changed this line
         message = redact_credentials(message)
         
         log_data: dict[str, Any] = {
@@ -52,10 +52,10 @@ class JSONFormatter(logging.Formatter):
         # Add any extra fields from the record's __dict__
         for key, value in record.__dict__.items():
             if key not in ["name", "msg", "args", "created", "filename", "funcName", 
-                          "levelname", "levelno", "lineno", "module", "msecs", 
-                          "message", "pathname", "process", "processName", 
-                          "relativeCreated", "thread", "threadName", "exc_info", 
-                          "exc_text", "stack_info", "taskName"]:
+                        "levelname", "levelno", "lineno", "module", "msecs", 
+                        "message", "pathname", "process", "processName", 
+                        "relativeCreated", "thread", "threadName", "exc_info", 
+                        "exc_text", "stack_info", "taskName"]:
                 # Redact credentials from string values
                 if isinstance(value, str):
                     value = redact_credentials(value)
