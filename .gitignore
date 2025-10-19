@@ -5,11 +5,13 @@ __pycache__/
 *.pyd
 *.pyo
 
+
 # Virtual environments
 .venv/
 venv/
 ENV/
 env/
+
 
 # Packaging and build
 build/
@@ -23,6 +25,7 @@ pip-wheel-metadata/
 pip-log.txt
 pip-delete-this-directory.txt
 
+
 # Testing & type checking
 .pytest_cache/
 .coverage
@@ -34,12 +37,15 @@ pip-delete-this-directory.txt
 .tox/
 .nox/
 
+
 # Jupyter
 .ipynb_checkpoints/
+
 
 # Logs
 logs/
 *.log
+
 
 # IDE/editor
 .vscode/
@@ -51,10 +57,12 @@ logs/
 *.sw?
 *.orig
 
+
 # OS files
 .DS_Store
 Thumbs.db
 desktop.ini
+
 
 # Environment/config
 .env
@@ -62,19 +70,33 @@ desktop.ini
 !.env.example
 config/config.yml
 
+
 # Docker & runtime
 .docker/
 docker-compose.override.yml
 .tmp/
 tmp/
 
-# ML/AI common artifacts (not source)
+
+# ML/AI artifacts (downloaded models, not source code)
 wandb/
 lightning_logs/
 outputs/
 runs/
-models/
 checkpoints/
+# Only ignore downloaded model files, not Python model definitions
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+*.bin
+*.pb
+models/*.pt
+models/*.pth
+models/*.onnx
+!src/**/models/  # Never ignore source code models/ directories
+
 
 # Node (if present in UI tooling)
 node_modules/
