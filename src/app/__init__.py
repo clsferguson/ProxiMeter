@@ -1,30 +1,5 @@
-from flask import Flask
+"""ProxiMeter FastAPI application package.
 
-
-def create_app() -> Flask:
-    """Flask application factory.
-
-    - Configures JSON logging
-    - Configures static and template folders
-    - Registers blueprints
-    """
-    # Configure JSON logging first
-    from .logging_config import configure_logging
-    configure_logging()
-
-    app = Flask(
-        __name__,
-        static_folder="static",
-        template_folder="templates",
-    )
-
-    # Register routes blueprint
-    try:
-        from .routes import register_blueprint  # local import to avoid circulars
-
-        register_blueprint(app)
-    except Exception as exc:  # pragma: no cover
-        # Defer errors until runtime to not block minimal app creation
-        app.logger.debug("Blueprint registration deferred/failed: %s", exc)
-
-    return app
+The FastAPI application is defined in main.py.
+This __init__.py is kept minimal to avoid circular imports.
+"""

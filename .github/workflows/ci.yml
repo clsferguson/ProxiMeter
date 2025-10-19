@@ -50,16 +50,25 @@ jobs:
 
       - name: Run container for smoke test
         run: |
-          docker run -d --rm -p 8000:8000 --name hello-counter test-image:local
+          docker run -d -p 8000:8000 --name proximeter test-image:local
           echo "container-started" > container.txt
+          sleep 2
+          echo "Container logs after startup:"
+          docker logs proximeter || true
 
       - name: Wait for health
         run: |
           set -e
           for i in {1..30}; do
+            # Check if container is still running
+            if ! docker ps | grep -q proximeter; then
+              echo "✗ Container exited unexpectedly"
+              docker logs proximeter || true
+              exit 1
+            fi
             code=$(curl -s -o /tmp/h.txt -w "%{http_code}" http://localhost:8000/health || true)
             body=$(cat /tmp/h.txt || true)
-            if [ "$code" = "200" ] && [ "$body" = "ok" ]; then
+            if [ "$code" = "200" ] && echo "$body" | grep -q '"status":"ok"'; then
               echo "✓ Health check passed"; exit 0
             fi
             sleep 1
@@ -67,14 +76,14 @@ jobs:
           echo "✗ Health check failed after 30s"
           echo "Response body:"
           cat /tmp/h.txt || true
-          docker logs hello-counter || true
+          docker logs proximeter || true
           exit 1
 
       - name: Teardown test container
         if: always()
         run: |
           if [ -f container.txt ]; then
-            docker rm -f hello-counter || true
+            docker rm -f proximeter || true
           fi
 
       - name: Build and push image
