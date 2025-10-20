@@ -6,6 +6,8 @@ Auto-generated from all feature plans. Last updated: 2025-10-19
 Object detection scoring for home automation (NOT NVR/recording). Real-time scoring only; no video storage.
 
 ## Active Technologies
+- TypeScript 5+, React 19.2, Node.js LTS + React 19.2, TypeScript 5+, Vite, React Router, Axios/fetch (003-frontend-react-migration)
+- N/A (stateless frontend) (003-frontend-react-migration)
 
 ### Backend (Mandatory)
 - Python 3.12 (container base: python:3.12-slim-trixie)
@@ -75,9 +77,9 @@ cd frontend; npm run build; npm run test; npm run lint
 - ESLint + Prettier for formatting
 
 ## Recent Changes
+- 003-frontend-react-migration: Added TypeScript 5+, React 19.2, Node.js LTS + React 19.2, TypeScript 5+, Vite, React Router, Axios/fetch
 - 2025-10-19: Constitution v2.3.0 - Clarified application purpose (object detection scoring for home automation, NOT NVR); added polygon zone management and scoring pipeline (distance/coordinates/size); made SSE mandatory, MQTT optional; updated React to 19.2
 - 2025-10-19: Constitution v2.2.0 - Added mandatory FFmpeg for RTSP processing; migrated to React TypeScript SPA with Vite; removed Jinja2 templates; backend now REST API only
-- 002-fastapi-rtsp-streams: Added Python 3.12 (container base: python:3.12-slim-trixie) + FastAPI, Uvicorn, Jinja2, Pydantic v2, PyYAML, opencv-python-headless, starlette, python-multipart (forms)
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
