@@ -1,10 +1,16 @@
-# ProxiMeter — RTSP Stream Manager
+# ProxiMeter — RTSP Object Detection Scoring for Home Automation
 
-A FastAPI web application for managing and viewing RTSP camera streams. Add, edit, reorder, and delete streams with a clean web interface. View live streams at ≤5 FPS via MJPEG playback.
+A FastAPI + React TypeScript application for real-time object detection scoring on RTSP camera streams. Create polygon zones, define scoring criteria (distance, coordinates, size), and stream scores to home automation systems via SSE or MQTT. NOT a video recorder or NVR.
 
-- Tech: Python 3.12, FastAPI, Uvicorn, Jinja2, Pydantic v2, PyYAML, OpenCV
-- Features: Add/Edit/Delete/Reorder RTSP streams, Live MJPEG playback (≤5 FPS), Persistent YAML storage
-- Endpoints: `/` (Landing UI), `/api/streams` (REST API), `/play/{id}.mjpg` (Playback), `/health` (Readiness), `/metrics` (Prometheus)
+- **Backend**: Python 3.12, FastAPI, Uvicorn, Pydantic v2, PyYAML, FFmpeg (RTSP processing), Shapely (polygon geometry)
+- **Frontend**: React 19.2, TypeScript 5+, Vite, optional animation libraries (framer-motion, react-bits, aceternity UI, motion-bits)
+- **Features**: 
+  - RTSP stream management (add/edit/delete)
+  - Polygon zone editor with visual overlays on live stream preview
+  - Real-time object detection scoring: distance from target, camera coordinates, bounding box size
+  - SSE score streaming (mandatory) + optional MQTT publishing
+  - NO video recording or storage (live frames only for inference)
+- **Endpoints**: `/` (React SPA), `/api/streams` (REST), `/api/zones` (REST), `/api/scores/stream` (SSE), `/health`, `/metrics`
 - **Security Warning**: LAN-only deployment; no authentication. RTSP credentials stored in plaintext. Do NOT expose to the internet without proper hardening.
 
 ## Quick Start
@@ -61,39 +67,44 @@ Or edit `docker-compose.yml` and change the ports mapping.
 ## Project Structure
 
 ```
-src/app/
-  wsgi.py                    # FastAPI ASGI application entry point
-  config_io.py               # YAML persistence (atomic writes)
-  logging_config.py          # JSON logging configuration
-  metrics.py                 # Prometheus metrics
-  api/
-    health.py                # Health endpoint
-    streams.py               # REST API for streams + playback
-    errors.py                # Error schemas and handlers
-  ui/
-    views.py                 # UI routes (landing, add, edit)
-  models/
-    stream.py                # Pydantic models (Stream, NewStream, EditStream)
-  services/
-    streams_service.py       # Business logic for stream management
-  utils/
-    rtsp.py                  # RTSP/MJPEG playback utilities
-    validation.py            # RTSP URL validation
-    strings.py               # Credential masking helpers
-  middleware/
-    rate_limit.py            # Rate limiting middleware
-    request_id.py            # Request ID middleware
-  templates/
-    base.html                # Base layout with header animation
-    index.html               # Landing page (stream list)
-    add_stream.html          # Add stream form
-    edit_stream.html         # Edit stream form
-    play.html                # Playback view
-  static/
-    styles.css               # CSS (header animation, equal-width grid)
-    app.js                   # Client-side JS (animations, drag-drop, delete confirm)
+backend/
+  src/app/
+    wsgi.py                    # FastAPI ASGI application entry point
+    config_io.py               # YAML persistence (atomic writes)
+    logging_config.py          # JSON logging configuration
+    metrics.py                 # Prometheus metrics
+    api/
+      health.py                # Health endpoint
+      streams.py               # REST API for streams + playback
+      errors.py                # Error schemas and handlers
+    models/
+      stream.py                # Pydantic models (Stream, NewStream, EditStream)
+    services/
+      streams_service.py       # Business logic for stream management
+    utils/
+      rtsp.py                  # FFmpeg-based RTSP/MJPEG playback utilities
+      validation.py            # RTSP URL validation with FFmpeg probe
+      strings.py               # Credential masking helpers
+    middleware/
+      rate_limit.py            # Rate limiting middleware
+      request_id.py            # Request ID middleware
+  tests/                       # Backend tests
+
+frontend/
+  src/
+    components/                # React components
+    pages/                     # Page components (landing, add, edit, play)
+    hooks/                     # Custom React hooks
+    services/                  # API client services
+    lib/                       # Utility functions
+  tests/                       # Frontend tests
+  package.json
+  tsconfig.json
+  vite.config.ts
+  index.html
+
 config/
-  config.yml                 # Stream persistence (mounted volume)
+  config.yml                   # Stream persistence (mounted volume)
 ```
 
 ## API Endpoints

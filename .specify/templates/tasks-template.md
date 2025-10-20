@@ -45,13 +45,15 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Create project structure per implementation plan (src/, tests/, Makefile)
-- [ ] T002 Initialize Python 3.12 project; add FastAPI, Uvicorn, Prometheus, MQTT, ONNX Runtime deps
-- [ ] T003 [P] Configure ruff/black, mypy; PEP8; pre-commit hooks
-- [ ] T004 Create Dockerfile (multi-stage, python:3.12-slim-trixie, non-root, HEALTHCHECK)
-- [ ] T005 Create docker-compose example with platform: linux/amd64 and GPU device exposure
-- [ ] T006 Create Makefile with amd64-enforcing targets (build, run, test, push)
-- [ ] T007 Create artifacts/versions.md and artifacts/decisions.md placeholders
+- [ ] T001 Create project structure per implementation plan (backend/, frontend/, Makefile)
+- [ ] T002 Initialize Python 3.12 backend project; add FastAPI, Uvicorn, Prometheus, MQTT, ONNX Runtime, FFmpeg Python bindings
+- [ ] T003 [P] Initialize React TypeScript frontend with Vite; add React 18+, TypeScript 5+, optional animation libs (framer-motion, react-bits, aceternity UI, motion-bits)
+- [ ] T004 [P] Configure backend: ruff/black, mypy; PEP8; pre-commit hooks
+- [ ] T005 [P] Configure frontend: ESLint, Prettier, TypeScript strict mode
+- [ ] T006 Create Dockerfile (multi-stage: Node.js frontend build → Python backend with FFmpeg, non-root, HEALTHCHECK)
+- [ ] T007 Create docker-compose example with platform: linux/amd64 and GPU device exposure
+- [ ] T008 Create Makefile with amd64-enforcing targets (build, run, test, push, frontend-dev)
+- [ ] T009 Create artifacts/versions.md and artifacts/decisions.md placeholders; document FFmpeg and React TypeScript adoption
 
 ---
 
@@ -63,17 +65,27 @@ description: "Task list template for feature implementation"
 
 Examples of foundational tasks (adjust based on your project):
 
-- [ ] T008 [P] Implement FastAPI app; register APIRouter modules (ui, api, streams, health, metrics)
-- [ ] T009 [P] Implement structured JSON logging and error handling
-- [ ] T010 [P] Implement config.yml loader/saver with schema validation
-- [ ] T011 [P] Implement RTSP validator utility and unit tests
-- [ ] T012 [P] Implement metrics (Prometheus): per-stream FPS, latency, queue depth, GPU utilization
-- [ ] T013 [P] Implement entrypoint.sh provisioning for GPU_BACKEND with version checks and fail-fast
-- [ ] T014 [P] Implement ONNX export pipeline for YOLO_MODEL on startup; single-model manager
-- [ ] T015 [P] Implement inference worker scaffolding with frame queue and 5 FPS cap
-- [ ] T016 [P] Implement security middleware: rate-limit sensitive routes, input validation; document LAN-only/no-auth posture
-- [ ] T017 [P] CI workflow to build amd64-only images via buildx and publish tags (GitHub runners)
-- [ ] T017a [P] Add CI_DRY_RUN=true path to start app without GPU and validate /health on CPU-only CI
+- [ ] T010 [P] Implement FastAPI app; register APIRouter modules (api, streams, zones, scores/SSE, health, metrics); NO UI routes (React SPA handles UI)
+- [ ] T011 [P] Implement structured JSON logging and error handling
+- [ ] T012 [P] Implement config.yml loader/saver with schema validation (streams + polygon zones)
+- [ ] T013 [P] Implement RTSP validator utility with FFmpeg probe and unit tests
+- [ ] T014 [P] Implement polygon zone models: point array, target point, enabled metrics (distance/coords/size)
+- [ ] T015 [P] Implement point-in-polygon utility using Shapely or equivalent; unit tests
+- [ ] T016 [P] Implement scoring calculator: distance from target, normalized coordinates, bounding box size
+- [ ] T017 [P] Implement metrics (Prometheus): per-stream FPS, latency, queue depth, GPU utilization, scores published
+- [ ] T018 [P] Implement entrypoint.sh provisioning for GPU_BACKEND with version checks (include FFmpeg version) and fail-fast
+- [ ] T019 [P] Implement ONNX export pipeline for YOLO_MODEL on startup; single-model manager
+- [ ] T020 [P] Implement inference worker scaffolding with FFmpeg frame extraction, queue, and 5 FPS cap
+- [ ] T021 [P] Implement scoring pipeline: detect objects, filter by zones, calculate metrics, emit to SSE + optional MQTT
+- [ ] T022 [P] Implement SSE endpoint for real-time score streaming with schema validation
+- [ ] T023 [P] Implement optional MQTT publisher for score events (same schema as SSE)
+- [ ] T024 [P] Implement security middleware: rate-limit sensitive routes, input validation; document LAN-only/no-auth posture; NO video storage
+- [ ] T025 [P] Implement static file serving for React production build in FastAPI
+- [ ] T026 [P] Create frontend project structure (React 19.2): components/, pages/, hooks/, services/, lib/
+- [ ] T027 [P] Implement frontend API client service for backend REST endpoints (streams, zones, scores)
+- [ ] T028 [P] Implement polygon zone editor component with canvas overlay on live stream preview
+- [ ] T029 [P] CI workflow to build amd64-only images via buildx (frontend build → backend runtime) and publish tags (GitHub runners)
+- [ ] T030 [P] Add CI_DRY_RUN=true path to start app without GPU and validate /health on CPU-only CI
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
