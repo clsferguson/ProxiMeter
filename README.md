@@ -3,7 +3,7 @@
 A FastAPI + React TypeScript application for real-time object detection scoring on RTSP camera streams. Create polygon zones, define scoring criteria (distance, coordinates, size), and stream scores to home automation systems via SSE or MQTT. NOT a video recorder or NVR.
 
 - **Backend**: Python 3.12, FastAPI, Uvicorn, Pydantic v2, PyYAML, FFmpeg (RTSP processing), Shapely (polygon geometry)
-- **Frontend**: React 19.2, TypeScript 5+, Vite, optional animation libraries (framer-motion, react-bits, aceternity UI, motion-bits)
+- **Frontend**: React 19.2, TypeScript 5+, Vite, Tailwind CSS, shadcn/ui component system (optional animation: framer-motion, react-bits, aceternity UI, motion-bits)
 - **Features**: 
   - RTSP stream management (add/edit/delete)
   - Polygon zone editor with visual overlays on live stream preview
@@ -63,6 +63,24 @@ APP_PORT=8080 docker compose up --build
 ```
 
 Or edit `docker-compose.yml` and change the ports mapping.
+
+### Frontend Development Workflow
+
+Use the Vite development server for rapid UI iteration. The frontend uses Tailwind CSS and the shadcn/ui component library.
+
+```bash
+cd frontend
+npm install
+npx shadcn@latest init # idempotent: ensures shadcn config is up to date
+npm run dev
+```
+
+Key conventions:
+
+- Tailwind tokens are defined in `tailwind.config.ts`; extend this file instead of writing ad-hoc CSS.
+- UI primitives live under `src/components/ui/` and are generated via `npx shadcn@latest add <component>`.
+- Custom components SHOULD compose shadcn/ui exports and utilities such as `cn` for class merging.
+- Global theming (light/dark) is managed through the `ThemeProvider` established in `main.tsx`.
 
 ## Project Structure
 
@@ -146,10 +164,11 @@ config/
 
 ### UI/UX
 
+- **Design system**: shadcn/ui primitives on Tailwind CSS ensure consistent spacing, typography, and theming.
 - **Header animation**: Centered on landing, animates to top-left on playback (400-700ms)
 - **Equal-width buttons**: Stream buttons in responsive grid (same width per row)
 - **Mobile-friendly**: Responsive layout
-- **Accessibility**: Keyboard navigation, ARIA labels, focus management
+- **Accessibility**: Keyboard navigation, ARIA labels, focus management baked into shadcn/ui components
 
 ## CI/CD
 

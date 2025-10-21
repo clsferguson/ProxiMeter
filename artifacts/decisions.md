@@ -10,6 +10,44 @@
 
 ## Architecture Decisions
 
+### ADR-011: Adopt Tailwind CSS + shadcn/ui Design System
+
+**Status**: Accepted  
+**Date**: 2025-10-21  
+**Branch**: 003-frontend-react-migration  
+**Spec**: `specs/003-frontend-react-migration/spec.md`
+
+**Context**:
+The React frontend migrated from server-rendered templates to a TypeScript SPA. Existing CSS was ad-hoc and difficult to scale across new polygon editor and scoring workflows. The constitution v2.4.0 mandates a standardized component system to maintain accessibility, responsiveness, and consistent styling.
+
+**Decision**:
+Adopt Tailwind CSS as the utility foundation and shadcn/ui (Tailwind + Radix UI primitives) as the component library for all React UI work.
+
+**Rationale**:
+1. **Consistency**: shadcn/ui enforces unified spacing, typography, and state styling across the SPA.
+2. **Accessibility**: Components ship with ARIA, keyboard navigation, and color contrast defaults.
+3. **Velocity**: CLI-driven component scaffolding accelerates feature delivery.
+4. **Composition**: Tailwind utilities plus `class-variance-authority` allow custom variants without bespoke CSS files.
+5. **Governance Alignment**: Satisfies Constitution Principle VIII and compliance checklist.
+
+**Consequences**:
+- ✅ Shared design tokens defined in `tailwind.config.ts` replace scattered CSS.
+- ✅ New UI components live under `frontend/src/components/ui/` generated via `npx shadcn add`.
+- ✅ Global theming delivered by the shadcn/ui `ThemeProvider` with dark/light modes.
+- ⚠️ Requires Tailwind build tooling in Vite and Docker image.
+- ⚠️ Existing legacy styles must be migrated or removed to avoid conflicts.
+
+**Implementation Notes**:
+- Tailwind/Tailwind Merge/Class Variance Authority configured during project initialization.
+- `lucide-react` provides iconography referenced by shadcn/ui components.
+- React Hook Form + Zod integrated with shadcn/ui form primitives for validation UX.
+- README documents setup and contribution guidelines; tasks.md updated with migration work items.
+
+**Alternatives Considered**:
+- **Plain Tailwind + custom components**: Rejected due to higher maintenance burden and inconsistent accessibility.
+- **Material UI / Chakra UI**: Rejected to avoid heavy runtime styling systems and to stay aligned with Tailwind utility-first approach.
+- **Continue legacy CSS**: Rejected due to Constitution compliance requirements and scalability concerns.
+
 ### ADR-001: FastAPI Migration from Flask
 
 **Status**: Accepted  

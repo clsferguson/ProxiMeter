@@ -1,31 +1,24 @@
 <!--
 Sync Impact Report
-- Version change: 2.2.0 → 2.3.0
+- Version change: 2.3.0 → 2.4.0
 - Modified sections:
-  - Title & Scope: Clarified application purpose (object detection scoring for home automation, NOT NVR/recording)
-  - Principle II: Added polygon zone scoring requirements (distance, coordinates, size)
-  - Principle VII: NEW - Scoring and Home Automation Integration principle
-  - Architecture & Execution Constraints:
-    * Clarified no video recording/storage requirements
-    * Updated React version to 19.2 (latest)
-    * Added polygon zone management and scoring pipeline requirements
-    * Added SSE and optional MQTT output requirements for automation integration
+  - Core Principles: Added Principle VIII mandating shadcn/ui adoption and clarified frontend requirements
+  - Architecture & Execution Constraints: Required shadcn/ui with Tailwind integration for the SPA
+  - Tooling & Evidence Requirements: Added shadcn/ui documentation sourcing requirement
+  - Governance › Compliance review: Added shadcn/ui compliance checkpoint
 - Added sections:
-  - Principle VII: Scoring and Home Automation Integration
+  - Principle VIII: Frontend UI Consistency with shadcn/ui
 - Removed sections: None
 - Templates requiring updates:
-	- .specify/templates/spec-template.md ⚠ pending (add polygon zone management FRs, scoring criteria FRs, SSE/MQTT output FRs)
-	- .specify/templates/tasks-template.md ⚠ pending (add polygon zone UI tasks, scoring pipeline tasks)
-	- .specify/templates/plan-template.md ⚠ pending (update Constitution Check with scoring requirements)
-	- README.md ⚠ pending (update description: clarify home automation focus, not NVR; add scoring features)
-	- artifacts/versions.md ⚠ pending (update React to 19.2)
-	- artifacts/decisions.md ⚠ pending (record scoring criteria design decisions, SSE vs MQTT trade-offs)
+	- .specify/templates/spec-template.md ✅ updated (frontend requirement includes shadcn/ui adoption)
+	- .specify/templates/plan-template.md ✅ updated (Constitution Check references shadcn/ui component mandate)
+	- .specify/templates/tasks-template.md ✅ updated (frontend tasks include shadcn/ui implementation)
+	- README.md ⚠ pending (document shadcn/ui component requirement and Tailwind usage)
+	- artifacts/versions.md ⚠ pending (record shadcn/ui and Tailwind versions/links)
+	- artifacts/decisions.md ⚠ pending (capture shadcn/ui adoption rationale and migration plan)
 - Follow-up TODOs:
-	- Update React version to 19.2 in frontend dependencies
-	- Design polygon zone data model (per-stream, multiple zones, point arrays)
-	- Design scoring algorithm specifications (distance, coordinates, size)
-	- Implement SSE endpoint for real-time score streaming
-	- Document home automation integration examples (Home Assistant, Node-RED)
+	- Define Tailwind + shadcn/ui theming tokens and dark-mode strategy
+	- Inventory existing UI for migration to shadcn/ui primitives
 -->
 
 # ProxiMeter: RTSP Object Detection Scoring for Home Automation (Docker-only, amd64) Constitution
@@ -129,6 +122,21 @@ enables integration with external automation platforms (Home Assistant, Node-RED
 etc.). Polygon zones and flexible scoring criteria support diverse use cases
 (person detection at doorways, object tracking in driveways, etc.).
 
+### VIII. Frontend UI Consistency with shadcn/ui
+The React SPA MUST adopt shadcn/ui component primitives backed by Tailwind CSS
+configuration checked into the repo. All new UI MUST compose shadcn/ui
+components (extending via the `cn` utility when custom styling is required) and
+adhere to a shared design token set for spacing, typography, and state visuals.
+If an existing interface cannot migrate immediately, the plan MUST document a
+timeline and debt owner. Custom components MUST be built on top of shadcn/ui and
+respect accessible semantics (ARIA roles, keyboard navigation, color contrast).
+Global theming (light/dark) MUST be controlled through Tailwind tokens exposed by
+the shadcn/ui config.
+
+Rationale: shadcn/ui provides a consistent, accessible base for the SPA while
+aligning with Tailwind-powered styling. Mandating the design system prevents UI
+fragmentation, accelerates development, and enforces accessibility guardrails.
+
 ## Architecture & Execution Constraints
 
 - Container-only runtime on linux/amd64; no direct host execution.
@@ -156,11 +164,13 @@ etc.). Polygon zones and flexible scoring criteria support diverse use cases
 - Web API/UI: FastAPI backend application with APIRouter modules for REST API,
 	stream control, zone management, score streaming (SSE), health, and metrics.
 	Frontend MUST be a React TypeScript SPA with mandatory React 19.2, TypeScript
-	5+, and Vite for bundling. Optional animation libraries MAY include
+	5+, and Vite for bundling. The component system MUST be implemented with
+	shadcn/ui on top of Tailwind CSS; custom elements MUST extend shadcn/ui tokens
+	and utilities (e.g., `cn`). Optional animation libraries MAY include
 	framer-motion, react-bits, aceternity UI, and motion-bits for enhanced UX.
 	Backend serves REST API only (no server-rendered templates). Frontend
 	communicates via REST/SSE. Dark, responsive UI optimized for mobile/touch with
-	polygon zone editor.
+	polygon zone editor and shadcn/ui-consistent styling.
 - APIs & outputs:
 	- SSE score streaming (mandatory): Serve real-time score events at a dedicated
 		SSE endpoint. Message schema MUST include: `timestamp, stream_id, zone_id (or
@@ -204,8 +214,8 @@ etc.). Polygon zones and flexible scoring criteria support diverse use cases
 	linux/amd64 flags and consistent tagging; include env var matrix and backend
 	support table in README plus Home Assistant examples. Support local frontend
 	development with hot-reload (Vite dev server proxying to backend). Document
-	frontend build process and technology stack (React, TypeScript, optional
-	animation libraries).
+	frontend build process and technology stack (React, TypeScript, shadcn/ui,
+	Tailwind, optional animation libraries).
 
 ## Tooling & Evidence Requirements
 
@@ -215,8 +225,8 @@ etc.). Polygon zones and flexible scoring criteria support diverse use cases
 	  Runtime, PyTorch/TorchAudio/TorchVision (if used), **FFmpeg** (mandatory),
 	  FastAPI/ASGI, Python packages
 	* Frontend: **React 19.2** (mandatory), TypeScript 5+, Vite, Node.js LTS,
-	  framer-motion (optional), react-bits (optional), aceternity UI (optional),
-	  motion-bits (optional)
+	  shadcn/ui (mandatory), Tailwind CSS, framer-motion (optional), react-bits
+	  (optional), aceternity UI (optional), motion-bits (optional)
 	* Infrastructure: Docker, docker-compose best practices
 	* Polygon/geometry libraries: Shapely (Python) or equivalent for point-in-polygon
 	  checks and geometric calculations
@@ -248,8 +258,9 @@ etc.). Polygon zones and flexible scoring criteria support diverse use cases
 		recording); no video storage beyond live inference frames.
 	- FFmpeg is used for all RTSP stream processing; version is validated and logged.
 	- GPU backend fail-fast behavior and no fallback are preserved.
-	- Frontend is React 19.2 TypeScript SPA with Vite; backend is REST API + SSE only
-		(no server-rendered templates).
+	- Frontend is React 19.2 TypeScript SPA with Vite and composes shadcn/ui
+		components on Tailwind CSS; backend is REST API + SSE only (no server-rendered
+		templates).
 	- Polygon zone management (CRUD, visual editor) and scoring pipeline (distance,
 		coordinates, size) are functional.
 	- SSE score streaming is mandatory; MQTT is optional; both use consistent schema.
@@ -264,4 +275,4 @@ etc.). Polygon zones and flexible scoring criteria support diverse use cases
 	- Tooling & Evidence artifacts (`artifacts/versions.md`, `decisions.md`) are
 		maintained and `entrypoint.sh` emits versions (including FFmpeg).
 
-**Version**: 2.3.0 | **Ratified**: 2025-10-17 | **Last Amended**: 2025-10-19
+**Version**: 2.4.0 | **Ratified**: 2025-10-17 | **Last Amended**: 2025-10-21

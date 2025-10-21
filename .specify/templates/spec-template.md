@@ -93,7 +93,7 @@
 - **FR-007**: SSE score streaming (MANDATORY): real-time events with schema: timestamp, stream_id, zone_id, object_class, confidence, distance, coordinates, size
 - **FR-008**: Optional MQTT publishing of score events using same schema as SSE; configurable QoS/retain
 - **FR-009**: Provide FastAPI-based REST API with APIRouter modules; NO server-rendered templates; serve React production build as static assets
-- **FR-010**: Frontend MUST be React 19.2 TypeScript 5+ SPA built with Vite; optional animation libraries: framer-motion, react-bits, aceternity UI, motion-bits
+- **FR-010**: Frontend MUST be React 19.2 TypeScript 5+ SPA built with Vite that composes shadcn/ui components on Tailwind CSS; optional animation libraries: framer-motion, react-bits, aceternity UI, motion-bits
 - **FR-011**: Provide REST endpoints for: stream CRUD, zone CRUD per stream, latest score snapshot per stream/zone, stream status
 - **FR-012**: Persist only /app/config/config.yml (streams + zones); no model caches, artifacts, video, or score history
 - **FR-013**: GPU backend provisioning via entrypoint.sh; fail fast on errors; print versions (including FFmpeg); support CI dry-run via `CI_DRY_RUN=true` to skip device access on CPU-only runners

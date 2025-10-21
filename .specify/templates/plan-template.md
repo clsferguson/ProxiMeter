@@ -42,7 +42,7 @@
   MQTT_ENABLED, MQTT_HOST, MQTT_PORT, MQTT_TOPIC
 - Persist ONLY /app/config/config.yml via volume; no model caches/artifacts or video storage
 - GPU backend provisioning is fail-fast (no fallback) and versions emitted
-- Frontend MUST be React 19.2 TypeScript SPA with Vite; backend REST API + SSE only (no templates)
+- Frontend MUST be React 19.2 TypeScript SPA with Vite that composes shadcn/ui components on Tailwind CSS; backend REST API + SSE only (no templates)
 - Observability: JSON logs, /health, Prometheus metrics present
 - Security: non-root, input validation, rate-limits; file I/O restricted; no authentication (LAN-only; DO NOT expose to WAN)
 - CI/build: buildx with --platform=linux/amd64; healthcheck in image; multi-stage build with frontend production bundle

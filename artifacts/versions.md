@@ -2,10 +2,10 @@
 
 ## Application Version
 
-- **Version**: 0.2.0
-- **Feature**: FastAPI RTSP Streams and Landing UI
-- **Branch**: 002-fastapi-rtsp-streams
-- **Date**: 2025-10-17
+- **Version**: 0.3.0
+- **Feature**: React 19.2 SPA with Tailwind + shadcn/ui Frontend
+- **Branch**: 003-frontend-react-migration
+- **Date**: 2025-10-21
 
 ## Technology Stack
 
@@ -14,18 +14,32 @@
 - **FastAPI**: Latest (ASGI web framework)
 - **Uvicorn**: Latest (ASGI server)
 - **Pydantic**: v2 (data validation)
+- **React**: 19.2.0 (frontend SPA)
+- **TypeScript**: 5.4.x (strict mode)
+- **Vite**: 5.x (bundler/dev server)
+- **Tailwind CSS**: 3.4.x (utility-first styling)
+- **shadcn/ui**: 2025-10 snapshot (Radix UI + Tailwind component library)
 
 ### Dependencies
-- **Jinja2**: Template engine for server-rendered HTML
 - **PyYAML**: YAML configuration persistence
 - **opencv-python-headless**: RTSP stream decoding and MJPEG encoding
 - **starlette**: ASGI toolkit (FastAPI dependency)
 - **python-multipart**: Form data handling
 - **prometheus-client**: Metrics exposition
+- **class-variance-authority**: Utility for shadcn/ui variant generation
+- **tailwind-merge**: Tailwind class merging helper (used by shadcn/ui `cn`)
+- **lucide-react**: Icon set used by shadcn/ui components
+- **react-hook-form**: Form state management paired with shadcn/ui form primitives
+- **zod**: Runtime schema validation used in forms
 
 ### Development Tools
-- **pytest**: Unit and integration testing
+- **pytest**: Unit and integration testing (backend)
 - **ruff**: Python linting and formatting
+- **Vitest**: Frontend unit testing
+- **@testing-library/react**: React component testing
+- **ESLint**: JavaScript/TypeScript linting (includes tailwindcss and react hooks plugins)
+- **Prettier**: Code formatting
+- **shadcn CLI**: Component generator (`npx shadcn@latest`)
 
 ## Runtime Environment
 
@@ -56,12 +70,7 @@
 ## API Endpoints
 
 ### UI Routes
-- `GET /`: Landing page (stream list)
-- `GET /streams/new`: Add stream form
-- `POST /streams/new`: Create stream (form submit)
-- `GET /streams/{id}/edit`: Edit stream form
-- `POST /streams/{id}/edit`: Update stream (form submit)
-- `POST /streams/{id}/delete`: Delete stream (form submit)
+- `GET /`: React SPA entry point (served static bundle)
 
 ### REST API
 - `GET /api/streams`: List all streams

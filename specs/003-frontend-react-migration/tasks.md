@@ -23,15 +23,16 @@
 **Purpose**: Project initialization and basic structure
 
 - [ ] T001 Create frontend/ directory structure per plan.md (frontend/src/components/, pages/, hooks/, services/, lib/)
-- [ ] T002 Initialize Vite + React 19.2 + TypeScript 5+ project in frontend/ with package.json, tsconfig.json, vite.config.ts
-- [ ] T003 [P] Install core dependencies: react, react-dom, react-router-dom, fetch (native), vitest, @testing-library/react
-- [ ] T004 [P] Configure TypeScript strict mode in tsconfig.json per research.md decisions
-- [ ] T005 [P] Configure Vite for production builds with proper asset handling and environment variables
-- [ ] T006 [P] Set up ESLint and Prettier configuration for code quality
-- [ ] T007 Create basic HTML template (index.html) and main.tsx entry point
-- [ ] T008 Update Dockerfile for multi-stage build: Node.js frontend build → serve static files from backend
-- [ ] T009 Update docker-compose.yml to expose frontend port and mount static files
-- [ ] T010 Create .env.local template with VITE_API_BASE_URL=http://localhost:8000/api
+- [ ] T002 Initialize Vite + React 19.2 + TypeScript 5+ project in frontend/ with package.json, tsconfig.json, vite.config.ts, tailwind.config.ts, postcss.config.cjs
+- [ ] T003 [P] Install core dependencies: react, react-dom, react-router-dom, fetch (native), vitest, @testing-library/react, tailwindcss, postcss, autoprefixer, class-variance-authority, tailwind-merge, lucide-react, and set up the shadcn/ui CLI
+- [ ] T004 [P] Run `npx shadcn@latest init` with Tailwind CSS, configure base styles, and commit generated shadcn/ui config
+- [ ] T005 [P] Configure TypeScript strict mode in tsconfig.json per research.md decisions
+- [ ] T006 [P] Configure Vite for production builds with Tailwind CSS integration, environment variables, and shadcn/ui tree-shaking
+- [ ] T007 [P] Set up ESLint and Prettier configuration for code quality (include tailwindcss and shadcn/ui linting rules)
+- [ ] T008 Create basic HTML template (index.html) and main.tsx entry point wiring Tailwind base styles and shadcn/ui `ThemeProvider`
+- [ ] T009 Update Dockerfile for multi-stage build: Node.js frontend build → serve static files from backend (ensure Tailwind + shadcn/ui build steps included)
+- [ ] T010 Update docker-compose.yml to expose frontend port and mount static files
+- [ ] T011 Create .env.local template with VITE_API_BASE_URL=http://localhost:8000/api
 
 ---
 
@@ -41,14 +42,14 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T011 [P] Create TypeScript interfaces for API contracts in frontend/src/lib/types.ts (Stream, StreamResponse, NewStreamRequest, EditStreamRequest, ErrorResponse)
-- [ ] T012 [P] Implement API service layer in frontend/src/services/api.ts using native Fetch with error handling, timeouts, and type safety
-- [ ] T013 [P] Create utility functions in frontend/src/lib/utils.ts for URL masking, validation helpers, and common operations
-- [ ] T014 [P] Set up React Router v6 configuration in App.tsx with routes for dashboard, add, edit, play pages
-- [ ] T015 [P] Create shared layout component in frontend/src/components/Layout.tsx with navigation and consistent styling
-- [ ] T016 [P] Port existing CSS from src/templates/*.html to frontend/src/lib/styles.css preserving visual design
-- [ ] T017 [P] Create reusable UI components: Button, Input, LoadingSpinner, ErrorMessage in frontend/src/components/ui/
-- [ ] T018 [P] Implement custom hooks: useStreams for stream management, useApi for API state in frontend/src/hooks/
+- [ ] T012 [P] Create TypeScript interfaces for API contracts in frontend/src/lib/types.ts (Stream, StreamResponse, NewStreamRequest, EditStreamRequest, ErrorResponse)
+- [ ] T013 [P] Implement API service layer in frontend/src/services/api.ts using native Fetch with error handling, timeouts, and type safety
+- [ ] T014 [P] Create utility functions in frontend/src/lib/utils.ts for URL masking, validation helpers, and common operations
+- [ ] T015 [P] Set up React Router v6 configuration in App.tsx with routes for dashboard, add, edit, play pages and wrap routes with shadcn/ui layout primitives
+- [ ] T016 [P] Create shared layout component in frontend/src/components/Layout.tsx using shadcn/ui `NavigationMenu`, `Sidebar`, and `Button` components for consistent styling
+- [ ] T017 [P] Migrate legacy CSS rules into Tailwind design tokens, extend tailwind.config with color/spacing theme, and remove direct usage of src/templates/*.html styles
+- [ ] T018 [P] Create reusable UI components by running `npx shadcn add` (Button, Input, Select, Dialog, Alert, Card, Badge, Skeleton, Toast) in frontend/src/components/ui/
+- [ ] T019 [P] Implement custom hooks: useStreams for stream management, useApi for API state in frontend/src/hooks/
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -62,12 +63,12 @@
 
 ### Implementation for User Story 1
 
-- [ ] T019 [US1] Create Dashboard page component in frontend/src/pages/Dashboard.tsx with stream list layout
-- [ ] T020 [P] [US1] Create StreamCard component in frontend/src/components/StreamCard.tsx showing name, masked URL, status badge, and action buttons
-- [ ] T021 [P] [US1] Create EmptyState component in frontend/src/components/EmptyState.tsx for when no streams exist
-- [ ] T022 [US1] Implement real-time status polling in Dashboard using useStreams hook (every 2 seconds)
-- [ ] T023 [US1] Add navigation header with "ProxiMeter" title and "Add Stream" button in Layout component
-- [ ] T024 [US1] Implement stream list rendering with responsive card layout (768px+ breakpoint)
+- [ ] T020 [US1] Create Dashboard page component in frontend/src/pages/Dashboard.tsx using shadcn/ui `PageHeader`, `Breadcrumb`, and responsive grid layout
+- [ ] T021 [P] [US1] Create StreamCard component in frontend/src/components/StreamCard.tsx composing shadcn/ui `Card`, `Badge`, `Button`, and iconography from lucide-react
+- [ ] T022 [P] [US1] Create EmptyState component in frontend/src/components/EmptyState.tsx using shadcn/ui `Alert` and `Button` for CTA when no streams exist
+- [ ] T023 [US1] Implement real-time status polling in Dashboard using useStreams hook (every 2 seconds)
+- [ ] T024 [US1] Add navigation header with "ProxiMeter" title and "Add Stream" button using shadcn/ui `NavigationMenu` + `Button`
+- [ ] T025 [US1] Implement stream list rendering with responsive card layout (768px+ breakpoint) using Tailwind grid utilities
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -81,12 +82,12 @@
 
 ### Implementation for User Story 2
 
-- [ ] T025 [US2] Create AddStream page component in frontend/src/pages/AddStream.tsx with form layout
-- [ ] T026 [P] [US2] Create StreamForm component in frontend/src/components/StreamForm.tsx (reusable for add/edit) with validation
-- [ ] T027 [US2] Implement form validation: name required, RTSP URL format, threshold 0-1 range
-- [ ] T028 [US2] Add form submission handling with loading states and error display
-- [ ] T029 [US2] Implement success navigation back to dashboard after stream creation
-- [ ] T030 [US2] Add cancel button returning to dashboard without saving
+- [ ] T026 [US2] Create AddStream page component in frontend/src/pages/AddStream.tsx with shadcn/ui `Form` layout and descriptive copy
+- [ ] T027 [P] [US2] Create StreamForm component in frontend/src/components/StreamForm.tsx (reusable for add/edit) using shadcn/ui `Form`, `Input`, `Select`, `Switch`, `Textarea`
+- [ ] T028 [US2] Implement form validation: name required, RTSP URL format, threshold 0-1 range with react-hook-form + zod integration used by shadcn/ui forms
+- [ ] T029 [US2] Add form submission handling with shadcn/ui `Button` loading states and `useToast` for success/error feedback
+- [ ] T030 [US2] Implement success navigation back to dashboard after stream creation
+- [ ] T031 [US2] Add cancel button returning to dashboard without saving using shadcn/ui `Button` variants
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
@@ -100,12 +101,12 @@
 
 ### Implementation for User Story 3
 
-- [ ] T031 [US3] Create EditStream page component in frontend/src/pages/EditStream.tsx with pre-populated form
-- [ ] T032 [US3] Reuse StreamForm component for edit functionality with initial values
-- [ ] T033 [US3] Implement route parameter handling for stream ID in edit page
-- [ ] T034 [US3] Add delete stream functionality with confirmation dialog
-- [ ] T035 [US3] Handle stream not found errors with redirect to dashboard
-- [ ] T036 [US3] Implement form pre-population from API data on page load
+- [ ] T032 [US3] Create EditStream page component in frontend/src/pages/EditStream.tsx with pre-populated form that reuses shadcn/ui `Form`
+- [ ] T033 [US3] Reuse StreamForm component for edit functionality with initial values and variant styling
+- [ ] T034 [US3] Implement route parameter handling for stream ID in edit page
+- [ ] T035 [US3] Add delete stream functionality with shadcn/ui `AlertDialog` confirmation
+- [ ] T036 [US3] Handle stream not found errors with redirect to dashboard using shadcn/ui `Alert`
+- [ ] T037 [US3] Implement form pre-population from API data on page load
 
 **Checkpoint**: User Stories 1, 2, AND 3 should now be independently functional
 
@@ -119,13 +120,13 @@
 
 ### Implementation for User Story 4
 
-- [ ] T037 [US4] Create PlayStream page component in frontend/src/pages/PlayStream.tsx with video container
-- [ ] T038 [P] [US4] Create VideoPlayer component in frontend/src/components/VideoPlayer.tsx with HTML5 video element
-- [ ] T039 [US4] Implement MJPEG stream URL construction and video source setup
-- [ ] T040 [US4] Add video player controls: play/pause, volume, fullscreen
-- [ ] T041 [US4] Implement error states: stream unavailable, unsupported codec, network error
-- [ ] T042 [US4] Add loading state with spinner during video initialization
-- [ ] T043 [US4] Implement back navigation to dashboard from play page
+- [ ] T038 [US4] Create PlayStream page component in frontend/src/pages/PlayStream.tsx with shadcn/ui `PageHeader` and layout shell
+- [ ] T039 [P] [US4] Create VideoPlayer component in frontend/src/components/VideoPlayer.tsx with HTML5 video element wrapped in shadcn/ui `AspectRatio`
+- [ ] T040 [US4] Implement MJPEG stream URL construction and video source setup
+- [ ] T041 [US4] Add video player controls: play/pause, volume, fullscreen using shadcn/ui `Button`, `DropdownMenu`
+- [ ] T042 [US4] Implement error states: stream unavailable, unsupported codec, network error surfaced via shadcn/ui `Alert`
+- [ ] T043 [US4] Add loading state with spinner during video initialization using shadcn/ui `Skeleton`
+- [ ] T044 [US4] Implement back navigation to dashboard from play page with shadcn/ui `Button`
 
 **Checkpoint**: All user stories should now be independently functional
 
@@ -135,14 +136,15 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T044 [P] Update README.md with frontend development setup and build instructions
-- [ ] T045 [P] Add component documentation and prop types in code comments
-- [ ] T046 [P] Optimize bundle size and verify <500KB gzipped production build
-- [ ] T047 [P] Implement responsive design touch targets (minimum 44x44px)
-- [ ] T048 [P] Add error boundaries for graceful error handling across components
-- [ ] T049 [P] Update artifacts/versions.md with React 19.2, TypeScript, Node.js versions
-- [ ] T050 [P] Test production build in Docker environment
-- [ ] T051 [P] Validate quickstart.md instructions work correctly
+- [ ] T045 [P] Update README.md with frontend development setup, Tailwind guidelines, shadcn/ui component usage, and build instructions
+- [ ] T046 [P] Add component documentation and prop types in code comments referencing the shadcn/ui primitives used
+- [ ] T047 [P] Optimize bundle size and verify <500KB gzipped production build (tree-shake unused shadcn/ui components)
+- [ ] T048 [P] Implement responsive design touch targets (minimum 44x44px) using Tailwind spacing tokens and shadcn/ui variants
+- [ ] T049 [P] Add error boundaries for graceful error handling across components leveraging shadcn/ui `Alert` and `Toast`
+- [ ] T050 [P] Update artifacts/versions.md with React 19.2, TypeScript, Node.js, shadcn/ui, Tailwind versions
+- [ ] T051 [P] Test production build in Docker environment
+- [ ] T052 [P] Validate quickstart.md instructions work correctly (include shadcn/ui setup steps)
+- [ ] T053 [P] Document Tailwind design tokens and component mapping in artifacts/decisions.md
 
 ---
 

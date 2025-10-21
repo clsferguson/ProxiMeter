@@ -47,7 +47,7 @@ description: "Task list template for feature implementation"
 
 - [ ] T001 Create project structure per implementation plan (backend/, frontend/, Makefile)
 - [ ] T002 Initialize Python 3.12 backend project; add FastAPI, Uvicorn, Prometheus, MQTT, ONNX Runtime, FFmpeg Python bindings
-- [ ] T003 [P] Initialize React TypeScript frontend with Vite; add React 18+, TypeScript 5+, optional animation libs (framer-motion, react-bits, aceternity UI, motion-bits)
+- [ ] T003 [P] Initialize React TypeScript frontend with Vite; add React 19.2, TypeScript 5+, Tailwind CSS, shadcn/ui, and optional animation libs (framer-motion, react-bits, aceternity UI, motion-bits)
 - [ ] T004 [P] Configure backend: ruff/black, mypy; PEP8; pre-commit hooks
 - [ ] T005 [P] Configure frontend: ESLint, Prettier, TypeScript strict mode
 - [ ] T006 Create Dockerfile (multi-stage: Node.js frontend build → Python backend with FFmpeg, non-root, HEALTHCHECK)
@@ -81,9 +81,9 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] T023 [P] Implement optional MQTT publisher for score events (same schema as SSE)
 - [ ] T024 [P] Implement security middleware: rate-limit sensitive routes, input validation; document LAN-only/no-auth posture; NO video storage
 - [ ] T025 [P] Implement static file serving for React production build in FastAPI
-- [ ] T026 [P] Create frontend project structure (React 19.2): components/, pages/, hooks/, services/, lib/
+- [ ] T026 [P] Create frontend project structure (React 19.2 + shadcn/ui): components/, pages/, hooks/, services/, lib/
 - [ ] T027 [P] Implement frontend API client service for backend REST endpoints (streams, zones, scores)
-- [ ] T028 [P] Implement polygon zone editor component with canvas overlay on live stream preview
+- [ ] T028 [P] Implement polygon zone editor component with canvas overlay on live stream preview using shadcn/ui primitives
 - [ ] T029 [P] CI workflow to build amd64-only images via buildx (frontend build → backend runtime) and publish tags (GitHub runners)
 - [ ] T030 [P] Add CI_DRY_RUN=true path to start app without GPU and validate /health on CPU-only CI
 
