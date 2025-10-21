@@ -1,6 +1,6 @@
 <!--
 Sync Impact Report
-- Version change: 2.1.0 → 2.2.0
+- Version change: 2.2.0 → 2.3.0
 - Modified sections:
   - Title & Scope: Clarified application purpose (object detection scoring for home automation, NOT NVR/recording)
   - Principle II: Added polygon zone scoring requirements (distance, coordinates, size)
