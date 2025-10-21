@@ -22,13 +22,13 @@
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Create frontend/ directory structure per plan.md (frontend/src/components/, pages/, hooks/, services/, lib/)
-- [ ] T002 Initialize Vite + React 19.2 + TypeScript 5+ project in frontend/ with package.json, tsconfig.json, vite.config.ts, tailwind.config.ts, postcss.config.cjs
-- [ ] T003 [P] Install core dependencies: react, react-dom, react-router-dom, fetch (native), vitest, @testing-library/react, tailwindcss, postcss, autoprefixer, class-variance-authority, tailwind-merge, lucide-react, and set up the shadcn/ui CLI
-- [ ] T004 [P] Run `npx shadcn@latest init` with Tailwind CSS, configure base styles, and commit generated shadcn/ui config
-- [ ] T005 [P] Configure TypeScript strict mode in tsconfig.json per research.md decisions
-- [ ] T006 [P] Configure Vite for production builds with Tailwind CSS integration, environment variables, and shadcn/ui tree-shaking
-- [ ] T007 [P] Set up ESLint and Prettier configuration for code quality (include tailwindcss and shadcn/ui linting rules)
+- [x] T001 Create frontend/ directory structure per plan.md (frontend/src/components/, pages/, hooks/, services/, lib/)
+- [x] T002 Initialize Vite + React 19.2 + TypeScript 5+ project in frontend/ with package.json, tsconfig.json, vite.config.ts, tailwind.config.ts, postcss.config.cjs
+- [x] T003 [P] Install core dependencies: react, react-dom, react-router-dom, fetch (native), vitest, @testing-library/react, tailwindcss, postcss, autoprefixer, class-variance-authority, tailwind-merge, lucide-react, and set up the shadcn/ui CLI
+- [x] T004 [P] Run `npx shadcn@latest init` with Tailwind CSS, configure base styles, and commit generated shadcn/ui config
+- [x] T005 [P] Configure TypeScript strict mode in tsconfig.json per research.md decisions
+- [x] T006 [P] Configure Vite for production builds with Tailwind CSS integration, environment variables, and shadcn/ui tree-shaking
+- [x] T007 [P] Set up ESLint and Prettier configuration for code quality (include tailwindcss and shadcn/ui linting rules)
 - [ ] T008 Create basic HTML template (index.html) and main.tsx entry point wiring Tailwind base styles and shadcn/ui `ThemeProvider`
 - [ ] T009 Update Dockerfile for multi-stage build: Node.js frontend build → serve static files from backend (ensure Tailwind + shadcn/ui build steps included)
 - [ ] T010 Update docker-compose.yml to expose frontend port and mount static files

@@ -1,73 +1,107 @@
-# React + TypeScript + Vite
+# ProxiMeter Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React 19.2 + TypeScript SPA powered by Vite, Tailwind CSS 4.1, and shadcn/ui.
 
-Currently, two official plugins are available:
+## Tech Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- React 19.2
+- TypeScript 5.9 (strict mode)
+- Vite 7.1
+- Tailwind CSS 4.1 + `@tailwindcss/vite`
+- shadcn/ui component registry
+- Vitest + Testing Library
+- ESLint (type-aware) + Prettier + Tailwind lint rules
 
-## React Compiler
+## Getting Started
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+The dev server runs on <http://localhost:5173> by default.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Available Scripts
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- `npm run dev` – start Vite dev server
+- `npm run build` – type-check and produce production build
+- `npm run preview` – preview production build
+- `npm run lint` – run ESLint with React/Tailwind rules
+- `npm run test` – run unit tests with Vitest
+
+## Tailwind & shadcn Setup
+
+- Tailwind CSS is configured via `@tailwindcss/postcss` and `@tailwindcss/vite`.
+- Global styles live in `src/styles/tailwind.css` (includes `@tailwind` layers and design tokens).
+- shadcn/ui is initialized via `npx shadcn@latest init`; component aliases are defined in `components.json`.
+- Use `npx shadcn@latest add <component>` to scaffold new UI primitives (`button`, `card`, etc.).
+
+### Adding Components
+
+```bash
+npx shadcn@latest add button
 ```
+
+Components are output under `src/components/ui/` and rely on Tailwind tokens defined in `src/styles/tailwind.css`.
+
+## Project Structure
+
+```
+frontend/
+├── components.json         # shadcn/ui configuration
+├── src/
+│   ├── components/         # shared & shadcn UI components
+│   ├── pages/              # route-level views
+│   ├── hooks/              # custom React hooks
+│   ├── services/           # API clients
+│   ├── lib/                # utilities and helpers
+│   ├── styles/tailwind.css # Tailwind base + design tokens
+│   ├── App.tsx             # root component
+│   └── main.tsx            # Vite entrypoint
+├── tailwind.config.ts      # Tailwind theme extensions
+├── vite.config.ts          # Vite + Tailwind plugin setup
+└── tsconfig.*.json         # Strict TypeScript configs
+```
+
+## Coding Guidelines
+
+- Compose UI exclusively from shadcn/ui primitives and Tailwind utility classes.
+- Keep TypeScript strict (no `any`; prefer typed hooks and services).
+- Place reusable utilities in `src/lib/`; API contracts in `src/lib/types.ts` (when implemented).
+- Follow shadcn/ui patterns for component variants and class merging (`cn` helper).
+
+## Tailwind Theme Tokens
+
+Design tokens and color palettes live in `src/styles/tailwind.css`. Update `@theme` values to tweak global colors, spacing, and typography.
+
+## Linting & Formatting
+
+- ESLint rules include React, Hooks, Tailwind, and shadcn recommendations.
+- Prettier handles formatting (`.prettierrc`).
+- Tailwind class ordering enforced via `eslint-plugin-tailwindcss` (v4 alpha).
+
+## Testing
+
+- Vitest configured with JSDOM environment (`vitest.setup.ts`).
+- Use Testing Library (`@testing-library/react`) for component tests.
+
+## Deployment Notes
+
+- Production build emits static assets to `frontend/dist/` via `npm run build`.
+- Backend Dockerfile will copy these assets into the Python image (see Phase 1 tasks T008/T009).
+
+## Useful Commands
+
+```bash
+# generate shadcn/ui component
+npx shadcn@latest add card
+
+# run lint checks
+npm run lint
+
+# execute tests with coverage
+npm run test:coverage
+```
+
+Refer to `specs/003-frontend-react-migration/` for full requirements, tasks, and architecture decisions.

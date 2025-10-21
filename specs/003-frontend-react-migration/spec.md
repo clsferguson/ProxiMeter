@@ -117,18 +117,18 @@ As a system administrator, I can view a live RTSP stream in the browser.
 - **FR-003**: Preserve existing visual design and layout from src/templates/*.html while modernizing implementation with React component architecture, TypeScript patterns, and optional animation libraries
 - **FR-004**: Implement REST API integration for stream CRUD operations using fetch or axios (axios preferred for interceptors and error handling)
 - **FR-005**: Use TypeScript strict mode for all components and utilities
-- **FR-016**: Handle API timeouts with 10-second limit before showing error message
-- **FR-017**: Implement consistent error response handling across all API calls (parse detail field from ErrorResponse schema)
-- **FR-006**: Configure Vite for production builds with proper asset handling
-- **FR-007**: Optionally integrate animation libraries (framer-motion, react-bits, aceternity UI, motion-bits) for enhanced UX
-- **FR-008**: Ensure responsive design works on desktop and mobile devices with touch-friendly controls (minimum 44x44px touch targets)
-- **FR-009**: Implement proper error handling and loading states for all API calls (see user stories for specific error messages)
-- **FR-010**: Add form validation for stream configuration inputs (see User Story 2 for validation rules)
-- **FR-011**: Support live video streaming display using HTML5 video element with standard controls
-- **FR-012**: Display real-time stream status and metrics in the UI (update every 2 seconds)
-- **FR-013**: Implement consistent navigation patterns across all views (app bar with back navigation where appropriate)
-- **FR-014**: Ensure consistent button styling and interaction patterns (primary actions in blue, secondary in gray, destructive in red)
-- **FR-015**: Handle all error scenarios with user-friendly messages (see specific error messages in user stories)
+**FR-016**: Handle API timeouts with 10-second limit before showing error message
+**FR-017**: Implement consistent error response handling across all API calls (parse detail field from ErrorResponse schema)
+**FR-006**: Configure Vite for production builds with proper asset handling, including Tailwind CSS 4.1 integration via `@tailwindcss/vite`
+**FR-007**: Optionally integrate animation libraries (framer-motion, react-bits, aceternity UI, motion-bits) for enhanced UX
+**FR-008**: Ensure responsive design works on desktop and mobile devices with touch-friendly controls (minimum 44x44px touch targets)
+**FR-009**: Implement proper error handling and loading states for all API calls (see user stories for specific error messages)
+**FR-010**: Add form validation for stream configuration inputs (see User Story 2 for validation rules)
+**FR-011**: Support live video streaming display using HTML5 video element with standard controls
+**FR-012**: Display real-time stream status and metrics in the UI (update every 2 seconds)
+**FR-013**: Implement consistent navigation patterns across all views (app bar with back navigation where appropriate)
+**FR-014**: Ensure consistent button styling and interaction patterns using Tailwind CSS utility classes and shadcn/ui component variants (primary actions, secondary, destructive)
+**FR-015**: Handle all error scenarios with user-friendly messages (see specific error messages in user stories)
 
 ### Key Entities *(include if feature involves data)*
 
@@ -180,7 +180,7 @@ As a system administrator, I can view a live RTSP stream in the browser.
 ## Assumptions
 
 - Existing backend API endpoints remain unchanged (validated: endpoints documented in specs/002-fastapi-rtsp-streams/contracts/openapi.yaml)
-- UI/UX design should match current static site appearance (see src/templates/*.html for reference)
+- UI/UX design should match current static site appearance (see src/templates/*.html for reference) while adopting Tailwind CSS 4 + shadcn/ui primitives
 - All current functionality must be preserved (stream CRUD and live viewing only)
 - Zones and scoring features are future enhancements, not part of this migration
 - Animation libraries are optional enhancements, not requirements
