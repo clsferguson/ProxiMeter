@@ -136,16 +136,16 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T045 [P] Update README.md with frontend development setup, Tailwind guidelines, shadcn/ui component usage, and build instructions
-- [ ] T045 [P] Remove old remnant/orphaned frontend from fastapi backend, moved to new react frontend
-- [ ] T046 [P] Add component documentation and prop types in code comments referencing the shadcn/ui primitives used
-- [ ] T047 [P] Optimize bundle size and verify <500KB gzipped production build (tree-shake unused shadcn/ui components)
-- [ ] T048 [P] Implement responsive design touch targets (minimum 44x44px) using Tailwind spacing tokens and shadcn/ui variants
-- [ ] T049 [P] Add error boundaries for graceful error handling across components leveraging shadcn/ui `Alert` and `Toast`
-- [ ] T050 [P] Update artifacts/versions.md with React 19.2, TypeScript, Node.js, shadcn/ui, Tailwind versions
-- [ ] T051 [P] Test production build in Docker environment
-- [ ] T052 [P] Validate quickstart.md instructions work correctly (include shadcn/ui setup steps)
-- [ ] T053 [P] Document Tailwind design tokens and component mapping in artifacts/decisions.md
+- [x] T045 [P] Update README.md with frontend development setup, Tailwind guidelines, shadcn/ui component usage, and build instructions
+- [x] T046 [P] Remove old remnant/orphaned frontend from fastapi backend, moved to new react frontend
+- [x] T047 [P] Add component documentation and prop types in code comments referencing the shadcn/ui primitives used
+- [x] T048 [P] Optimize bundle size and verify <500KB gzipped production build (tree-shake unused shadcn/ui components)
+- [x] T049 [P] Implement responsive design touch targets (minimum 44x44px) using Tailwind spacing tokens and shadcn/ui variants
+- [x] T050 [P] Add error boundaries for graceful error handling across components leveraging shadcn/ui `Alert` and `Toast`
+- [x] T051 [P] Update artifacts/versions.md with React 19.2, TypeScript, Node.js, shadcn/ui, Tailwind versions
+- [x] T052 [P] Test production build in Docker environment
+- [x] T053 [P] Validate quickstart.md instructions work correctly (include shadcn/ui setup steps)
+- [x] T054 [P] Document Tailwind design tokens and component mapping in artifacts/decisions.md
 
 ---
 

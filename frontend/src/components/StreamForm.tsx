@@ -1,8 +1,34 @@
 /**
- * Reusable stream form component for adding and editing streams
+ * StreamForm Component - Reusable form for adding and editing streams
+ * 
+ * Composes shadcn/ui primitives: Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage,
+ * Card, CardContent, CardDescription, CardHeader, CardTitle, Alert, AlertDescription, Button, Input
+ * 
  * User Stories 2 & 3: Add/Edit Stream forms
  * 
- * Uses react-hook-form with zod validation and shadcn/ui components
+ * Features:
+ * - Client-side validation using react-hook-form + zod
+ * - Real-time error display via shadcn/ui FormMessage
+ * - Loading state during submission with disabled button
+ * - Cancel button to return to dashboard
+ * - Accessible form with proper labels and descriptions
+ * - Responsive layout using Tailwind CSS
+ * 
+ * @component
+ * @param {StreamFormProps} props - Component props
+ * @param {StreamResponse} [props.initialValues] - Initial values for edit mode, undefined for add mode
+ * @param {Function} props.onSubmit - Callback when form is submitted successfully
+ * @param {boolean} [props.isLoading=false] - Whether the form is currently submitting
+ * @param {string|null} [props.error=null] - Error message to display
+ * @param {string} [props.submitLabel="Add Stream"] - Submit button label
+ * @param {boolean} [props.isEdit=false] - Whether this is an edit form
+ * @returns {JSX.Element} Rendered form
+ * 
+ * @example
+ * <StreamForm
+ *   onSubmit={handleSubmit}
+ *   submitLabel="Add Stream"
+ * />
  */
 
 import { useState } from 'react'

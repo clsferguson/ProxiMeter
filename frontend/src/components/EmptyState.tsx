@@ -1,7 +1,20 @@
 /**
- * EmptyState component - Displayed when no streams are configured
+ * EmptyState Component - Displayed when no streams are configured
  * 
- * Shows a centered message with a prominent "Add First Stream" CTA button
+ * Composes shadcn/ui primitives: Button, Alert
+ * Uses lucide-react icons for visual emphasis
+ * 
+ * Shows a centered message with:
+ * - Large icon (AlertCircle from lucide-react)
+ * - Descriptive heading and text
+ * - Prominent "Add First Stream" CTA button using shadcn/ui Button
+ * - Helpful tip box with RTSP URL format example
+ * 
+ * @component
+ * @returns {JSX.Element} Rendered empty state
+ * 
+ * @example
+ * <EmptyState />
  */
 
 import { Link } from 'react-router-dom'

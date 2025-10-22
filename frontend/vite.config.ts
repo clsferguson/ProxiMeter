@@ -30,6 +30,17 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       assetsDir: 'assets',
       chunkSizeWarningLimit: 600,
+      // Optimization settings for production bundle
+      minify: 'terser',
+      rollupOptions: {
+        output: {
+          // Tree-shake unused shadcn/ui components
+          manualChunks: {
+            'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+            'ui-vendor': ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-alert-dialog'],
+          },
+        },
+      },
     },
     test: {
       globals: true,

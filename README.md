@@ -75,12 +75,79 @@ npx shadcn@latest init # idempotent: ensures shadcn config is up to date
 npm run dev
 ```
 
-Key conventions:
+The dev server runs on `http://localhost:5173` and proxies API calls to the backend (configured in `vite.config.ts`).
 
+#### Tailwind CSS & shadcn/ui Guidelines
+
+**Design Tokens**:
 - Tailwind tokens are defined in `tailwind.config.ts`; extend this file instead of writing ad-hoc CSS.
+- Use Tailwind utilities for spacing, colors, typography, and responsive breakpoints.
+- Breakpoints: `sm` (640px), `md` (768px), `lg` (1024px), `xl` (1280px), `2xl` (1536px).
+- Minimum touch target size: `44x44px` (use `h-11 w-11` or equivalent Tailwind spacing).
+
+**Component Architecture**:
 - UI primitives live under `src/components/ui/` and are generated via `npx shadcn@latest add <component>`.
 - Custom components SHOULD compose shadcn/ui exports and utilities such as `cn` for class merging.
+- Use `class-variance-authority` (CVA) for component variants; see shadcn/ui examples.
 - Global theming (light/dark) is managed through the `ThemeProvider` established in `main.tsx`.
+
+**Adding New Components**:
+```bash
+cd frontend
+npx shadcn@latest add button  # Adds Button component to src/components/ui/button.tsx
+npx shadcn@latest add card    # Adds Card component
+npx shadcn@latest add dialog  # Adds Dialog component
+```
+
+**Component Documentation**:
+- Document prop types and shadcn/ui primitives used in JSDoc comments.
+- Example:
+  ```typescript
+  /**
+   * StreamCard - Displays a single RTSP stream with status and actions.
+   * Composes shadcn/ui Card, Badge, Button, and DropdownMenu primitives.
+   * @param stream - Stream object with id, name, url, status
+   * @param onEdit - Callback when edit button is clicked
+   * @param onDelete - Callback when delete button is clicked
+   */
+  export function StreamCard({ stream, onEdit, onDelete }: StreamCardProps) {
+    // ...
+  }
+  ```
+
+#### TypeScript & Code Quality
+
+- **Strict Mode**: TypeScript strict mode is enabled in `tsconfig.json`. All types must be explicit.
+- **Linting**: ESLint with Tailwind CSS and accessibility plugins. Run `npm run lint` to check.
+- **Formatting**: Prettier is configured. Run `npm run format` to auto-format code.
+- **Testing**: Vitest + React Testing Library. Run `npm run test` to execute tests.
+
+#### Build & Optimization
+
+- **Production Build**: `npm run build` creates an optimized bundle in `dist/`.
+- **Bundle Size**: Target <500KB gzipped. Tree-shake unused shadcn/ui components by importing only what you use.
+- **Environment Variables**: Frontend uses hardcoded API base URL `/api` (relative path). No build-time configuration needed.
+
+#### Common Tasks
+
+```bash
+cd frontend
+
+# Development
+npm run dev              # Start Vite dev server (http://localhost:5173)
+npm run build           # Build production bundle
+npm run preview         # Preview production build locally
+
+# Code Quality
+npm run lint            # Run ESLint
+npm run format          # Format code with Prettier
+npm run test            # Run Vitest tests
+npm run test:ui         # Run tests with UI
+
+# shadcn/ui
+npx shadcn@latest add <component>  # Add a new component
+npx shadcn@latest list             # List available components
+```
 
 ## Project Structure
 

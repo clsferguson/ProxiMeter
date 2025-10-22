@@ -1,6 +1,31 @@
 /**
- * Shared layout component with navigation
- * Provides consistent header and navigation across all pages
+ * Layout Component - Shared layout with navigation
+ * 
+ * Composes shadcn/ui primitives and Tailwind CSS utilities for responsive layout
+ * Uses lucide-react icons for navigation
+ * 
+ * Provides consistent structure across all pages:
+ * - Sticky header with ProxiMeter branding and navigation
+ * - Responsive navigation (hidden on mobile, visible on md+ breakpoint)
+ * - Mobile-optimized "Add Stream" button
+ * - Main content area (flex-1 to fill available space)
+ * - Footer with copyright/info
+ * 
+ * Features:
+ * - Responsive design with Tailwind breakpoints (md: 768px+)
+ * - Active link highlighting based on current route
+ * - Backdrop blur effect on header (supports-[backdrop-filter])
+ * - Touch-friendly navigation targets (44x44px minimum)
+ * 
+ * @component
+ * @param {LayoutProps} props - Component props
+ * @param {React.ReactNode} props.children - Page content to render in main area
+ * @returns {JSX.Element} Rendered layout
+ * 
+ * @example
+ * <Layout>
+ *   <Dashboard />
+ * </Layout>
  */
 
 import { Link, useLocation } from 'react-router-dom'
@@ -24,7 +49,7 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60">
+      <header className="sticky top-0 z-50 w-full border-b bg-card/95 backdrop-blur supports-backdrop-filter:bg-card/60">
         <div className="container flex h-16 items-center justify-between">
           <div className="flex items-center gap-6">
             <Link to="/" className="flex items-center space-x-2">
@@ -36,7 +61,7 @@ export default function Layout({ children }: LayoutProps) {
               <Link
                 to="/"
                 className={cn(
-                  'flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary',
+                  'flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary px-3 py-2 rounded-md min-h-10 min-w-10',
                   isActive('/') && !location.pathname.includes('/add')
                     ? 'text-foreground'
                     : 'text-muted-foreground'
@@ -48,7 +73,7 @@ export default function Layout({ children }: LayoutProps) {
               <Link
                 to="/add"
                 className={cn(
-                  'flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary',
+                  'flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary px-3 py-2 rounded-md min-h-10 min-w-10',
                   isActive('/add') ? 'text-foreground' : 'text-muted-foreground'
                 )}
               >
@@ -58,11 +83,11 @@ export default function Layout({ children }: LayoutProps) {
             </nav>
           </div>
 
-          {/* Mobile Add Button */}
+          {/* Mobile Add Button - 44x44px minimum touch target */}
           <div className="md:hidden">
             <Link
               to="/add"
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-4 py-2 min-w-11"
             >
               <Plus className="h-4 w-4 mr-2" />
               Add Stream

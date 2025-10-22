@@ -5,6 +5,7 @@
 
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { ThemeProvider } from './components/theme-provider'
+import ErrorBoundary from './components/ErrorBoundary'
 
 // Pages
 import Dashboard from './pages/Dashboard'
@@ -15,26 +16,28 @@ import NotFound from './pages/NotFound'
 
 function App() {
   return (
-    <ThemeProvider defaultTheme="system" storageKey="proximeter-theme">
-      <BrowserRouter>
-        <div className="min-h-screen">
-          <Routes>
-            {/* Dashboard - Main page */}
-            <Route path="/" element={<Dashboard />} />
-            
-            {/* Stream Management */}
-            <Route path="/add" element={<AddStream />} />
-            <Route path="/edit/:streamId" element={<EditStream />} />
-            
-            {/* Stream Playback */}
-            <Route path="/play/:streamId" element={<PlayStream />} />
-            
-            {/* 404 Not Found */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </div>
-      </BrowserRouter>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider defaultTheme="system" storageKey="proximeter-theme">
+        <BrowserRouter>
+          <div className="min-h-screen">
+            <Routes>
+              {/* Dashboard - Main page */}
+              <Route path="/" element={<Dashboard />} />
+              
+              {/* Stream Management */}
+              <Route path="/add" element={<AddStream />} />
+              <Route path="/edit/:streamId" element={<EditStream />} />
+              
+              {/* Stream Playback */}
+              <Route path="/play/:streamId" element={<PlayStream />} />
+              
+              {/* 404 Not Found */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </div>
+        </BrowserRouter>
+      </ThemeProvider>
+    </ErrorBoundary>
   )
 }
 

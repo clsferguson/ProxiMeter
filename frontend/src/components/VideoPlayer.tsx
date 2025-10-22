@@ -1,9 +1,30 @@
 /**
  * VideoPlayer Component - Display live MJPEG stream
  * 
+ * Composes shadcn/ui primitives: AspectRatio, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+ * DropdownMenuTrigger, Alert, AlertDescription, Skeleton
+ * 
  * Renders an HTML5 video element with MJPEG stream source.
  * Includes error handling, loading states, and fullscreen controls.
  * Uses shadcn/ui AspectRatio for responsive video container.
+ * 
+ * Features:
+ * - MJPEG stream playback via HTML5 video element
+ * - Loading skeleton during stream initialization
+ * - Error states: unavailable, unsupported codec, network error
+ * - Fullscreen toggle using Fullscreen API
+ * - Mute/unmute toggle
+ * - Responsive aspect ratio (16:9)
+ * - Graceful error recovery with retry capability
+ * 
+ * @component
+ * @param {VideoPlayerProps} props - Component props
+ * @param {string} props.streamId - Stream ID for constructing MJPEG URL
+ * @param {string} props.rtspUrl - Original RTSP URL (for reference, not used directly)
+ * @returns {JSX.Element} Rendered video player
+ * 
+ * @example
+ * <VideoPlayer streamId="stream-123" rtspUrl="rtsp://camera.local/stream" />
  */
 
 import { useEffect, useRef, useState } from 'react'

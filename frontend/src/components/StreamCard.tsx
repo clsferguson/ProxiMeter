@@ -1,12 +1,22 @@
 /**
- * StreamCard component - Individual stream card with status indicators
+ * StreamCard Component - Individual stream card with status indicators
+ * 
+ * Composes shadcn/ui primitives: Card, CardContent, CardDescription, CardHeader, CardTitle, Badge, Button
  * 
  * Displays stream information with:
- * - Status badge (green/yellow/red)
- * - Stream name (truncated at 40 chars)
- * - Masked RTSP URL (last 20 chars)
- * - Enabled/Disabled toggle
- * - Action buttons (Edit, Play, Delete)
+ * - Status badge (green/yellow/red) using shadcn/ui Badge with custom styling
+ * - Stream name (truncated at 40 chars with tooltip)
+ * - Masked RTSP URL (last 20 chars with tooltip)
+ * - Action buttons (Edit, Play, Delete) using shadcn/ui Button variants
+ * - Created date display
+ * 
+ * @component
+ * @param {StreamCardProps} props - Component props
+ * @param {StreamResponse} props.stream - Stream object with id, name, rtsp_url, status, created_at
+ * @returns {JSX.Element} Rendered stream card
+ * 
+ * @example
+ * <StreamCard stream={stream} />
  */
 
 import { Link } from 'react-router-dom'

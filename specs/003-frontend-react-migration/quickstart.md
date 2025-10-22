@@ -6,8 +6,8 @@
 ## Prerequisites
 
 - Node.js LTS (18.x or later)
-- npm or yarn package manager
-- Backend running on `http://localhost:8000`
+- npm package manager
+- Backend running on `http://localhost:8000` (for development)
 
 ## Development Setup
 
@@ -18,30 +18,41 @@ cd frontend
 npm install
 ```
 
-### 2. Environment Configuration
-
-Create `.env.local` in the frontend directory:
-
-```env
-VITE_API_BASE_URL=http://localhost:8000/api
-VITE_APP_TITLE=ProxiMeter
-```
-
-### 3. Start Development Server
+### 2. Start Development Server
 
 ```bash
 npm run dev
 ```
 
-The development server will start on `http://localhost:5173` and proxy API requests to the backend.
+The development server will start on `http://localhost:5173` with automatic proxy to the backend API at `/api`.
 
-### 4. Build for Production
+### 3. Build for Production
 
 ```bash
 npm run build
 ```
 
-This creates an optimized production build in the `dist/` directory.
+This creates an optimized production build in the `dist/` directory with tree-shaken shadcn/ui components.
+
+### 4. Adding New UI Components
+
+To add new shadcn/ui components:
+
+```bash
+npx shadcn@latest add <component-name>
+```
+
+For example:
+```bash
+npx shadcn@latest add tooltip
+npx shadcn@latest add popover
+```
+
+This will:
+- Download the component source from the shadcn/ui registry
+- Add it to `src/components/ui/`
+- Update your dependencies if needed
+- Automatically tree-shake unused components during build
 
 ## Project Structure
 
@@ -72,11 +83,17 @@ frontend/
 
 ## API Integration
 
-The frontend communicates with the backend REST API:
+The frontend communicates with the backend REST API via relative paths:
 
-- **Base URL**: `http://localhost:8000/api`
-- **Streams**: `GET/POST /streams`, `PATCH/DELETE /streams/{id}`
-- **Video Playback**: `GET /streams/play/{id}.mjpg`
+- **Base URL**: `/api` (proxied to backend in development, served from same origin in production)
+- **Streams**: `GET/POST /api/streams`, `PATCH/DELETE /api/streams/{id}`
+- **Video Playback**: `GET /api/streams/play/{id}.mjpg`
+- **Health Check**: `GET /api/health`
+
+All API calls use the Fetch API with:
+- 10-second default timeout
+- Automatic error handling and type safety
+- Request ID tracking for debugging
 
 ## Development Workflow
 
@@ -88,17 +105,69 @@ The frontend communicates with the backend REST API:
 
 ## Common Issues
 
-### CORS Errors
-- Ensure backend allows requests from `http://localhost:5173`
-- Check backend CORS configuration
-
 ### API Connection Failed
 - Verify backend is running on port 8000
-- Check `.env.local` has correct `VITE_API_BASE_URL`
+- Check that the proxy is working: `npm run dev` should show proxy configuration
+- In production, ensure the frontend is served from the same origin as the backend
 
 ### TypeScript Errors
 - Run `npm run lint` to check for issues
 - Ensure all imports have proper type definitions
+- Check that shadcn/ui components are properly imported from `@/components/ui/`
+
+### Build Errors
+- Clear `node_modules/` and reinstall: `rm -r node_modules && npm install`
+- Clear Vite cache: `rm -r dist/` and rebuild
+- Ensure TypeScript compilation passes: `npm run build` includes `tsc -b` check
+
+### Component Not Found
+- Verify the component is added via `npx shadcn@latest add <component-name>`
+- Check that the import path is correct: `import { Button } from '@/components/ui/button'`
+- Ensure the component is exported from `src/components/ui/index.ts` if using barrel exports
+
+## Tailwind CSS & shadcn/ui Customization
+
+### Design Tokens
+
+The application uses Tailwind CSS with shadcn/ui components. Customize the design system in:
+
+- **Colors**: `frontend/tailwind.config.ts` - Update the `colors` object
+- **Spacing**: `frontend/tailwind.config.ts` - Modify `spacing` values
+- **Typography**: `frontend/tailwind.config.ts` - Adjust `fontSize`, `fontFamily`
+- **Component Variants**: `src/components/ui/*.tsx` - Use `class-variance-authority` for variants
+
+### Component Development
+
+When creating new components:
+
+1. **Use shadcn/ui primitives**: Import from `@/components/ui/`
+2. **Apply Tailwind classes**: Use utility classes for styling
+3. **Define variants**: Use `cva()` from `class-variance-authority` for component variants
+4. **Add TypeScript types**: Define prop interfaces for type safety
+5. **Document with JSDoc**: Add comments explaining component purpose and props
+
+Example:
+```typescript
+import { Button } from '@/components/ui/button'
+import { cva, type VariantProps } from 'class-variance-authority'
+
+const myComponentVariants = cva('base-classes', {
+  variants: {
+    variant: {
+      default: 'default-classes',
+      secondary: 'secondary-classes',
+    },
+  },
+})
+
+interface MyComponentProps extends VariantProps<typeof myComponentVariants> {
+  children: React.ReactNode
+}
+
+export function MyComponent({ variant, children }: MyComponentProps) {
+  return <div className={myComponentVariants({ variant })}>{children}</div>
+}
+```
 
 ## Next Steps
 
