@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client"
 
 import App from "./App.tsx"
 import "./index.css"
-import { ThemeProvider } from "@/components/theme-provider"
 
 const rootElement = document.getElementById("root")
 
@@ -13,8 +12,6 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <ThemeProvider attribute="class" defaultTheme="system" storageKey="proximeter-theme">
-      <App />
-    </ThemeProvider>
+    <App />
   </StrictMode>,
 )

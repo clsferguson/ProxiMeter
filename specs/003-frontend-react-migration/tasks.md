@@ -42,14 +42,14 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T012 [P] Create TypeScript interfaces for API contracts in frontend/src/lib/types.ts (Stream, StreamResponse, NewStreamRequest, EditStreamRequest, ErrorResponse)
-- [ ] T013 [P] Implement API service layer in frontend/src/services/api.ts using native Fetch with error handling, timeouts, and type safety
-- [ ] T014 [P] Create utility functions in frontend/src/lib/utils.ts for URL masking, validation helpers, and common operations
-- [ ] T015 [P] Set up React Router v6 configuration in App.tsx with routes for dashboard, add, edit, play pages and wrap routes with shadcn/ui layout primitives
-- [ ] T016 [P] Create shared layout component in frontend/src/components/Layout.tsx using shadcn/ui `NavigationMenu`, `Sidebar`, and `Button` components for consistent styling
-- [ ] T017 [P] Migrate legacy CSS rules into Tailwind design tokens, extend tailwind.config with color/spacing theme, and remove direct usage of src/templates/*.html styles
-- [ ] T018 [P] Create reusable UI components by running `npx shadcn add` (Button, Input, Select, Dialog, Alert, Card, Badge, Skeleton, Toast) in frontend/src/components/ui/
-- [ ] T019 [P] Implement custom hooks: useStreams for stream management, useApi for API state in frontend/src/hooks/
+- [X] T012 [P] Create TypeScript interfaces for API contracts in frontend/src/lib/types.ts (Stream, StreamResponse, NewStreamRequest, EditStreamRequest, ErrorResponse)
+- [X] T013 [P] Implement API service layer in frontend/src/services/api.ts using native Fetch with error handling, timeouts, and type safety
+- [X] T014 [P] Create utility functions in frontend/src/lib/utils.ts for URL masking, validation helpers, and common operations
+- [X] T015 [P] Set up React Router v6 configuration in App.tsx with routes for dashboard, add, edit, play pages and wrap routes with shadcn/ui layout primitives
+- [X] T016 [P] Create shared layout component in frontend/src/components/Layout.tsx using shadcn/ui `NavigationMenu`, `Sidebar`, and `Button` components for consistent styling
+- [X] T017 [P] Migrate legacy CSS rules into Tailwind design tokens, extend tailwind.config with color/spacing theme, and remove direct usage of src/templates/*.html styles
+- [X] T018 [P] Create reusable UI components by running `npx shadcn add` (Button, Input, Select, Dialog, Alert, Card, Badge, Skeleton, Toast) in frontend/src/components/ui/
+- [X] T019 [P] Implement custom hooks: useStreams for stream management, useApi for API state in frontend/src/hooks/
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 

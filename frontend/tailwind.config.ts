@@ -1,9 +1,9 @@
 import type { Config } from 'tailwindcss'
 import tailwindAnimate from 'tailwindcss-animate'
-import { fontFamily } from 'tailwindcss/defaultTheme'
+import fontFamily from 'tailwindcss/defaultTheme'
 
 const config: Config = {
-  darkMode: ['class'],
+  darkMode: 'class',
   content: ['index.html', 'src/**/*.{ts,tsx}'],
   theme: {
     container: {
@@ -55,7 +55,7 @@ const config: Config = {
         sm: `calc(var(--radius) - 4px)`,
       },
       fontFamily: {
-        sans: ['Inter', ...fontFamily.sans],
+        sans: ['Inter', ...fontFamily.fontFamily.sans],
       },
       keyframes: {
         'accordion-down': {
