@@ -47,11 +47,33 @@ function createTimeoutController(timeoutMs: number = DEFAULT_TIMEOUT): AbortCont
  */
 async function parseErrorResponse(response: Response): Promise<ApiRequestError> {
   try {
-    const errorData: ErrorResponse = await response.json();
+    const contentType = response.headers.get('content-type');
+    
+    // Check if response is JSON
+    if (contentType?.includes('application/json')) {
+      const errorData: ErrorResponse = await response.json();
+      return new ApiRequestError(
+        errorData.detail || 'An error occurred',
+        response.status,
+        errorData.detail
+      );
+    }
+    
+    // If not JSON, likely HTML error page (404, 500, etc.)
+    const text = await response.text();
+    const isHtml = text.trim().toLowerCase().startsWith('<!doctype') || text.includes('<html');
+    
+    if (isHtml) {
+      return new ApiRequestError(
+        `Backend returned HTML error (HTTP ${response.status}). The API endpoint may not exist or the backend is misconfigured.`,
+        response.status,
+        `Check that the API_BASE_URL is correct and the backend is running.`
+      );
+    }
+    
     return new ApiRequestError(
-      errorData.detail || 'An error occurred',
-      response.status,
-      errorData.detail
+      `HTTP ${response.status}: ${response.statusText}`,
+      response.status
     );
   } catch {
     return new ApiRequestError(
@@ -92,16 +114,34 @@ async function fetchWithTimeout<T>(
     }
 
     // Parse JSON response
-    return await response.json();
+    try {
+      return await response.json();
+    } catch {
+      // JSON parse error - likely HTML response
+      throw new ApiRequestError(
+        'Invalid JSON response from server. The backend may be returning an error page instead of JSON.',
+        response.status,
+        'Verify the API_BASE_URL is correct and the backend is running and accessible.'
+      );
+    }
   } catch (error) {
     // Handle timeout
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new ApiRequestError('Request timeout', 408, 'The request took too long to complete');
+      throw new ApiRequestError(
+        'Request timeout',
+        408,
+        `The request took longer than ${timeoutMs}ms to complete. The backend may be unresponsive or unreachable.`
+      );
     }
 
-    // Handle network errors
+    // Handle network errors (CORS, connection refused, etc.)
     if (error instanceof TypeError) {
-      throw new ApiRequestError('Network error', undefined, 'Failed to connect to the server');
+      throw new ApiRequestError(
+        'Network error: Failed to connect to the backend',
+        undefined,
+        `Check that the backend is running at ${API_BASE_URL} (configured as ${API_BASE_URL}). ` +
+        'For development, ensure VITE_API_URL is set correctly in .env.development'
+      );
     }
 
     // Re-throw API errors

@@ -30,10 +30,10 @@ export function useApi<T, Args extends unknown[] = []>(
   })
 
   const execute = useCallback(
-    async (...args: Args): Promise<T | null> => {
+    async (..._args: Args): Promise<T | null> => {
       try {
         setState(prev => ({ ...prev, isLoading: true, error: null }))
-        const result = await apiFunction(...args)
+        const result = await apiFunction(..._args)
         setState({ data: result, isLoading: false, error: null })
         return result
       } catch (err) {
@@ -72,12 +72,12 @@ export function useFormSubmit<T, Args extends unknown[] = []>(
   const [success, setSuccess] = useState(false)
 
   const submit = useCallback(
-    async (...args: Args): Promise<T | null> => {
+    async (..._args: Args): Promise<T | null> => {
       try {
         setIsSubmitting(true)
         setError(null)
         setSuccess(false)
-        const result = await submitFunction(...args)
+        const result = await submitFunction(..._args)
         setSuccess(true)
         return result
       } catch (err) {

@@ -14,6 +14,12 @@ React 19.2 + TypeScript SPA powered by Vite, Tailwind CSS 4.1, and shadcn/ui.
 
 ## Getting Started
 
+### Prerequisites
+
+The frontend requires a running backend API. See the main ProxiMeter README for backend setup instructions.
+
+### Development
+
 ```bash
 cd frontend
 npm install
@@ -21,6 +27,20 @@ npm run dev
 ```
 
 The dev server runs on <http://localhost:5173> by default.
+
+**Important**: Make sure the backend is running on `http://localhost:8000` before starting the frontend dev server, or set `VITE_API_URL` to the correct backend URL in `.env.development`.
+
+### Environment Configuration
+
+Create a `.env.development` file for local development (already included with default values):
+
+```bash
+VITE_API_URL=http://localhost:8000
+VITE_DEV_SERVER_HOST=127.0.0.1
+VITE_DEV_SERVER_PORT=5173
+```
+
+The Vite dev server automatically proxies `/api/*` requests to the backend API URL.
 
 ### Available Scripts
 
