@@ -11,7 +11,7 @@
 - [x] CHK001 Are all required REST API endpoints specified in the contract? [Completeness, openapi.yaml]
 - [x] CHK002 Are request and response schemas defined for all endpoints? [Completeness, openapi.yaml components/schemas]
 - [x] CHK003 Are error response formats specified for all failure scenarios? [Completeness, openapi.yaml ErrorResponse schema]
-- [ ] CHK004 Are real-time communication requirements (SSE) documented? [Completeness, Gap - SSE for status updates not in this migration]
+- ~~[ ] CHK004 Are real-time communication requirements (SSE) documented?~~ [Completeness, Gap - SSE for status updates not in this migration]
 - [x] CHK005 Are API integration requirements defined for all CRUD operations? [Completeness, Spec API Integration Requirements]
 - [x] CHK006 Are loading state requirements specified for API calls? [Completeness, Spec API Integration Requirements]
 - [x] CHK007 Are retry/timeout requirements defined for API failures? [Completeness, Spec API Integration Requirements: 10s timeout]
@@ -47,22 +47,22 @@
 - [x] CHK025 Are requirements specified for concurrent API calls? [Coverage, Spec Assumptions: stateless frontend]
 - [x] CHK026 Are API requirements defined for backend unavailability? [Coverage, Spec Edge Cases: backend unreachable]
 - [x] CHK027 Are requirements specified for partial API response failures? [Coverage, Spec API Integration: HTTP status codes]
-- [ ] CHK028 Are API requirements defined for large data sets? [Coverage, Not applicable - small stream lists]
+- ~~[ ] CHK028 Are API requirements defined for large data sets?~~ [Coverage, Not applicable - small stream lists]
 
 ## Edge Case Coverage
 
 - [x] CHK029 Is behavior specified for invalid RTSP URLs in API requests? [Edge Case, Spec User Story 2: validation error]
 - [x] CHK030 Are requirements defined for API timeouts during form submission? [Edge Case, Spec API Integration: 10s timeout]
 - [x] CHK031 Is behavior specified when API returns unexpected data formats? [Edge Case, Spec API Integration: HTTP 500 handling]
-- [ ] CHK032 Are requirements defined for API rate limiting scenarios? [Edge Case, Not in scope - LAN environment]
-- [ ] CHK033 Is behavior specified for SSE connection failures? [Edge Case, Future enhancement - not in this migration]
+- ~~[ ] CHK032 Are requirements defined for API rate limiting scenarios?~~ [Edge Case, Not in scope - LAN environment]
+- ~~[ ] CHK033 Is behavior specified for SSE connection failures?~~ [Edge Case, Future enhancement - not in this migration]
 
 ## Non-Functional Requirements
 
-- [ ] CHK034 Are API security requirements specified (CORS, input validation)? [Non-Functional, Backend responsibility]
+- ~~[ ] CHK034 Are API security requirements specified (CORS, input validation)?~~ [Non-Functional, Backend responsibility]
 - [x] CHK035 Are API performance requirements quantified? [Non-Functional, Spec SC-001: <2s dashboard load]
-- [ ] CHK036 Are API reliability requirements defined (uptime, failover)? [Non-Functional, Out of scope - LAN environment]
-- [ ] CHK037 Are API monitoring/logging requirements specified? [Non-Functional, Backend responsibility]
+- ~~[ ] CHK036 Are API reliability requirements defined (uptime, failover)?~~ [Non-Functional, Out of scope - LAN environment]
+- ~~[ ] CHK037 Are API monitoring/logging requirements specified?~~ [Non-Functional, Backend responsibility]
 
 **Note**: Security, monitoring, and logging are backend responsibilities documented in specs/002-fastapi-rtsp-streams/.
 

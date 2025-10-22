@@ -87,7 +87,7 @@ Key conventions:
 ```
 backend/
   src/app/
-    wsgi.py                    # FastAPI ASGI application entry point
+    main.py                    # FastAPI ASGI application entry point
     config_io.py               # YAML persistence (atomic writes)
     logging_config.py          # JSON logging configuration
     metrics.py                 # Prometheus metrics

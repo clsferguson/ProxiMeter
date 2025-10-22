@@ -61,7 +61,7 @@
 ## Non-Functional Requirements
 
 - [x] CHK035 Are touch target size requirements defined for mobile interactions? [Non-Functional, FR-008]
-- [ ] CHK036 Are animation performance requirements specified for smooth interactions? [Non-Functional, Optional]
+- ~~[ ] CHK036 Are animation performance requirements specified for smooth interactions?~~ [Non-Functional, Optional]
 
 **Note**: Accessibility requirements (keyboard navigation, screen readers, color contrast) are deferred to future enhancements and not in scope for this migration.
 

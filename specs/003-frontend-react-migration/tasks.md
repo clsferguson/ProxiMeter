@@ -29,10 +29,10 @@
 - [x] T005 [P] Configure TypeScript strict mode in tsconfig.json per research.md decisions
 - [x] T006 [P] Configure Vite for production builds with Tailwind CSS integration, environment variables, and shadcn/ui tree-shaking
 - [x] T007 [P] Set up ESLint and Prettier configuration for code quality (include tailwindcss and shadcn/ui linting rules)
-- [ ] T008 Create basic HTML template (index.html) and main.tsx entry point wiring Tailwind base styles and shadcn/ui `ThemeProvider`
-- [ ] T009 Update Dockerfile for multi-stage build: Node.js frontend build → serve static files from backend (ensure Tailwind + shadcn/ui build steps included)
-- [ ] T010 Update docker-compose.yml to expose frontend port and mount static files
-- [ ] T011 Create .env.local template with VITE_API_BASE_URL=http://localhost:8000/api
+- [X] T008 Create basic HTML template (index.html) and main.tsx entry point wiring Tailwind base styles and shadcn/ui `ThemeProvider`
+- [X] T009 Update Dockerfile for multi-stage build: Node.js frontend build → serve static files from backend (ensure Tailwind + shadcn/ui build steps included)
+- [X] T010 Update docker-compose.yml to expose frontend port and mount static files
+- [X] T011 Create .env.local template with VITE_API_BASE_URL=http://localhost:8000/api
 
 ---
 

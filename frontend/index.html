@@ -1,16 +1,47 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+    />
     <meta
       name="description"
       content="ProxiMeter frontend for RTSP stream management and monitoring."
     />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <script>
+      (function () {
+        const storageKey = 'proximeter-theme';
+        try {
+          const storedTheme = window.localStorage.getItem(storageKey);
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+          const shouldUseDark = storedTheme === 'dark' || (storedTheme !== 'light' && prefersDark);
+          const theme = shouldUseDark ? 'dark' : 'light';
+
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.classList.toggle('dark', theme === 'dark');
+        } catch (error) {
+          console.warn('Theme hydration warning:', error);
+        }
+      })();
+    </script>
     <title>ProxiMeter</title>
   </head>
-  <body>
+  <body class="min-h-screen bg-background font-sans antialiased">
+    <noscript>
+      <div class="bg-destructive/20 text-destructive-foreground p-4 text-center text-sm">
+        JavaScript is required to run ProxiMeter. Please enable JavaScript in your browser settings.
+      </div>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

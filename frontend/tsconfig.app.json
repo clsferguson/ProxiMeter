@@ -9,7 +9,7 @@
     "paths": {
       "@/*": ["./*"]
     },
-    "types": ["vite/client", "vitest/globals"],
+    "types": ["vite/client", "vitest/globals", "next-themes"],
     "skipLibCheck": false,
 
     /* Bundler mode */
