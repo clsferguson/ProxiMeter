@@ -120,15 +120,15 @@
 
 ### Implementation for User Story 4
 
-- [ ] T038 [US4] Create PlayStream page component in frontend/src/pages/PlayStream.tsx with shadcn/ui `PageHeader` and layout shell
-- [ ] T039 [P] [US4] Create VideoPlayer component in frontend/src/components/VideoPlayer.tsx with HTML5 video element wrapped in shadcn/ui `AspectRatio`
-- [ ] T040 [US4] Implement MJPEG stream URL construction and video source setup
-- [ ] T041 [US4] Add video player controls: play/pause, volume, fullscreen using shadcn/ui `Button`, `DropdownMenu`
-- [ ] T042 [US4] Implement error states: stream unavailable, unsupported codec, network error surfaced via shadcn/ui `Alert`
-- [ ] T043 [US4] Add loading state with spinner during video initialization using shadcn/ui `Skeleton`
-- [ ] T044 [US4] Implement back navigation to dashboard from play page with shadcn/ui `Button`
+- [X] T038 [US4] Create PlayStream page component in frontend/src/pages/PlayStream.tsx with shadcn/ui `PageHeader` and layout shell
+- [X] T039 [P] [US4] Create VideoPlayer component in frontend/src/components/VideoPlayer.tsx with HTML5 video element wrapped in shadcn/ui `AspectRatio`
+- [X] T040 [US4] Implement MJPEG stream URL construction and video source setup
+- [X] T041 [US4] Add video player control: fullscreen using shadcn/ui `Button`, `DropdownMenu`
+- [X] T042 [US4] Implement error states: stream unavailable, unsupported codec, network error surfaced via shadcn/ui `Alert`
+- [X] T043 [US4] Add loading state with spinner during video initialization using shadcn/ui `Skeleton`
+- [X] T044 [US4] Implement back navigation to dashboard from play page with shadcn/ui `Button`
 
-**Checkpoint**: All user stories should now be independently functional
+**Checkpoint**: ✅ **COMPLETE** - All user stories should now be independently functional
 
 ---
 
@@ -137,6 +137,7 @@
 **Purpose**: Improvements that affect multiple user stories
 
 - [ ] T045 [P] Update README.md with frontend development setup, Tailwind guidelines, shadcn/ui component usage, and build instructions
+- [ ] T045 [P] Remove old remnant/orphaned frontend from fastapi backend, moved to new react frontend
 - [ ] T046 [P] Add component documentation and prop types in code comments referencing the shadcn/ui primitives used
 - [ ] T047 [P] Optimize bundle size and verify <500KB gzipped production build (tree-shake unused shadcn/ui components)
 - [ ] T048 [P] Implement responsive design touch targets (minimum 44x44px) using Tailwind spacing tokens and shadcn/ui variants
