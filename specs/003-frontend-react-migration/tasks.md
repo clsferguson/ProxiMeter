@@ -32,7 +32,7 @@
 - [X] T008 Create basic HTML template (index.html) and main.tsx entry point wiring Tailwind base styles and shadcn/ui `ThemeProvider`
 - [X] T009 Update Dockerfile for multi-stage build: Node.js frontend build → serve static files from backend (ensure Tailwind + shadcn/ui build steps included)
 - [X] T010 Update docker-compose.yml to expose frontend port and mount static files
-- [X] T011 Create .env.local template with VITE_API_BASE_URL=http://localhost:8000/api
+- [X] T011 Create constants.ts with hardcoded API_BASE_URL='/api' (frontend served from backend, no env var needed)
 
 ---
 

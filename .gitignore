@@ -68,7 +68,9 @@ desktop.ini
 .env
 .env.*
 !.env.example
-config/config.yml
+# User config overrides (template config/config.yml is tracked)
+config/config.local.yml
+config/config.prod.yml
 
 
 # Docker & runtime

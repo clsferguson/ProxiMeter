@@ -3,16 +3,11 @@ services:
     image: ghcr.io/clsferguson/proximeter:latest
     container_name: ProxiMeter
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: [gpu]
+    gpus: all
     ports:
       - "8000:8000"
     environment:
       - APP_PORT=${APP_PORT:-8000}
-      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000/api}
     volumes:
       - proximeter_config:/app/config
     healthcheck:
