@@ -99,7 +99,7 @@ models/*.pth
 models/*.onnx
 !src/**/models/  # Never ignore source code models/ directories
 # implementation reports
-.reports/
+.impreports/
 
 
 # Node (if present in UI tooling)
