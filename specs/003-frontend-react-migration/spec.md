@@ -187,6 +187,7 @@ As a system administrator, I can view a live RTSP stream in the browser.
 - Target browsers: modern Chrome, Firefox, Safari, Edge (latest 2 versions)
 - Application runs in trusted LAN environment (no additional authentication required beyond current implementation)
 - Multiple concurrent users are supported by backend; frontend is stateless with no shared session state
+- **API Configuration**: Frontend API base URL is hardcoded to `/api` (relative path); frontend is served from backend on same port; no build-time API URL configuration needed
 
 ## Dependencies
 

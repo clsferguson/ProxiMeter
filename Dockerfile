@@ -7,9 +7,9 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 
 FROM frontend-deps AS frontend-build
 COPY frontend/ ./
-ARG VITE_API_BASE_URL=http://localhost:8000/api
 ENV NODE_ENV=production
-ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+# Frontend uses hardcoded relative API path '/api' (see frontend/src/lib/constants.ts)
+# No build-time API URL configuration needed
 RUN npm run build
 
 FROM python:3.12-slim-trixie AS python-base

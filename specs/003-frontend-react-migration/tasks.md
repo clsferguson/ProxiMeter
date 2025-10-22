@@ -82,14 +82,14 @@
 
 ### Implementation for User Story 2
 
-- [ ] T026 [US2] Create AddStream page component in frontend/src/pages/AddStream.tsx with shadcn/ui `Form` layout and descriptive copy
-- [ ] T027 [P] [US2] Create StreamForm component in frontend/src/components/StreamForm.tsx (reusable for add/edit) using shadcn/ui `Form`, `Input`, `Select`, `Switch`, `Textarea`
-- [ ] T028 [US2] Implement form validation: name required, RTSP URL format, threshold 0-1 range with react-hook-form + zod integration used by shadcn/ui forms
-- [ ] T029 [US2] Add form submission handling with shadcn/ui `Button` loading states and `useToast` for success/error feedback
-- [ ] T030 [US2] Implement success navigation back to dashboard after stream creation
-- [ ] T031 [US2] Add cancel button returning to dashboard without saving using shadcn/ui `Button` variants
+- [X] T026 [US2] Create AddStream page component in frontend/src/pages/AddStream.tsx with shadcn/ui `Form` layout and descriptive copy
+- [X] T027 [P] [US2] Create StreamForm component in frontend/src/components/StreamForm.tsx (reusable for add/edit) using shadcn/ui `Form`, `Input`, `Select`, `Switch`, `Textarea`
+- [X] T028 [US2] Implement form validation: name required, RTSP URL format, threshold 0-1 range with react-hook-form + zod integration used by shadcn/ui forms
+- [X] T029 [US2] Add form submission handling with shadcn/ui `Button` loading states and `useToast` for success/error feedback
+- [X] T030 [US2] Implement success navigation back to dashboard after stream creation
+- [X] T031 [US2] Add cancel button returning to dashboard without saving using shadcn/ui `Button` variants
 
-**Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
+**Checkpoint**: At this point, User Stories 1 AND 2 should both work independently ✅ COMPLETE
 
 ---
 
@@ -101,14 +101,14 @@
 
 ### Implementation for User Story 3
 
-- [ ] T032 [US3] Create EditStream page component in frontend/src/pages/EditStream.tsx with pre-populated form that reuses shadcn/ui `Form`
-- [ ] T033 [US3] Reuse StreamForm component for edit functionality with initial values and variant styling
-- [ ] T034 [US3] Implement route parameter handling for stream ID in edit page
-- [ ] T035 [US3] Add delete stream functionality with shadcn/ui `AlertDialog` confirmation
-- [ ] T036 [US3] Handle stream not found errors with redirect to dashboard using shadcn/ui `Alert`
-- [ ] T037 [US3] Implement form pre-population from API data on page load
+- [X] T032 [US3] Create EditStream page component in frontend/src/pages/EditStream.tsx with pre-populated form that reuses shadcn/ui `Form`
+- [X] T033 [US3] Reuse StreamForm component for edit functionality with initial values and variant styling
+- [X] T034 [US3] Implement route parameter handling for stream ID in edit page
+- [X] T035 [US3] Add delete stream functionality with shadcn/ui `AlertDialog` confirmation
+- [X] T036 [US3] Handle stream not found errors with redirect to dashboard using shadcn/ui `Alert`
+- [X] T037 [US3] Implement form pre-population from API data on page load
 
-**Checkpoint**: User Stories 1, 2, AND 3 should now be independently functional
+**Checkpoint**: User Stories 1, 2, AND 3 should now be independently functional ✅ COMPLETE
 
 ---
 

@@ -47,6 +47,26 @@ Migrate static HTML/CSS/JS frontend to React 19.2 TypeScript SPA with Vite, pres
 - Tooling evidence: artifacts/versions.md updated (include FFmpeg, React 19.2, TypeScript, Node.js, polygon libs); decisions recorded; entrypoint
   prints runtime stack versions (including FFmpeg)
 
+## API Configuration
+
+**Frontend-Backend Communication**:
+- Frontend API base URL is **hardcoded to `/api`** (relative path in `frontend/src/lib/constants.ts`)
+- Frontend is served from the backend container on the same port
+- No build-time API URL configuration needed (frontend uses relative path)
+- API requests are proxied through the backend at `/api/*` endpoints
+
+**Docker Port Configuration**:
+- Backend port is configurable via `APP_PORT` environment variable (default: 8000)
+- Entrypoint (`entrypoint.sh`) reads `APP_PORT` and starts Uvicorn on that port
+- Frontend and backend share the same port (no port conflicts possible)
+- Docker Compose example: `APP_PORT=8000` (or any other port)
+
+**Port Conflict Handling**:
+- Since frontend is served from backend, both use the same port
+- No internal port conflicts possible (frontend at `/`, API at `/api`)
+- If user changes `APP_PORT`, both frontend and API automatically use the new port
+- Healthcheck uses `${APP_PORT}` environment variable for correct port
+
 ## Project Structure
 
 ### Documentation (this feature)
