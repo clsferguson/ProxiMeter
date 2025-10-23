@@ -27,7 +27,7 @@ async def serve_frontend_root():
     return FileResponse(INDEX_HTML)
 
 
-@router.get("/{path:path}", response_class=FileResponse)
+@router.get("/{path:path}")
 async def serve_frontend_spa(path: str):
     """
     Serve the React SPA for all non-API routes.
