@@ -21,7 +21,8 @@ Dockerfile*
 node_modules/
 tmp/
 .tmp/
-config/*.yml
+config/config.local.yml
+config/config.prod.yml
 *.sw?
 Thumbs.db
 .DS_Store

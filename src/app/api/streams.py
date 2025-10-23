@@ -19,7 +19,7 @@ def get_streams_service() -> StreamsService:
     return StreamsService()
 
 
-@router.get("/", response_model=List[dict])
+@router.get("", response_model=List[dict])
 async def list_streams(
     service: StreamsService = Depends(get_streams_service)
 ):
@@ -45,7 +45,7 @@ async def list_streams(
         )
 
 
-@router.post("/", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED)
 async def create_stream(
     new_stream: NewStream,
     service: StreamsService = Depends(get_streams_service)
@@ -162,7 +162,7 @@ async def delete_stream(
         )
 
 
-@router.post("/reorder")
+@router.post("reorder")
 async def reorder_streams(
     reorder_data: dict,
     service: StreamsService = Depends(get_streams_service)

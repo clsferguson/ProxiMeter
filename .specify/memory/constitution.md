@@ -1,46 +1,56 @@
 <!--
 Sync Impact Report
-- Version change: 2.0.0 → 2.1.0
+- Version change: 2.3.0 → 2.4.0
 - Modified sections:
-  - Architecture & Execution Constraints: Web framework updated (Flask → FastAPI)
-  - Persistence & ports: Server wording (Flask → ASGI/Uvicorn)
-  - Tooling & Evidence Requirements: Framework docs (Flask → FastAPI/ASGI)
-- Added sections: None
+  - Core Principles: Added Principle VIII mandating shadcn/ui adoption and clarified frontend requirements
+  - Architecture & Execution Constraints: Required shadcn/ui with Tailwind integration for the SPA
+  - Tooling & Evidence Requirements: Added shadcn/ui documentation sourcing requirement
+  - Governance › Compliance review: Added shadcn/ui compliance checkpoint
+- Added sections:
+  - Principle VIII: Frontend UI Consistency with shadcn/ui
 - Removed sections: None
 - Templates requiring updates:
-	- .specify/templates/spec-template.md ✅ updated (FR-005 FastAPI/APIRouter)
-	- .specify/templates/tasks-template.md ✅ updated (FastAPI app + APIRouter; removed CSRF line)
-	- .specify/templates/plan-template.md ✅ no Flask references; unchanged
-	- .specify/templates/commands/* ⚠ pending (directory absent)
-	- README.md ✅ updated (Tech stack and structure)
-	- src/app/* ⚠ pending (migrate Flask app to FastAPI with APIRouter and templates)
-	- artifacts/versions.md ⚠ pending (create and keep current)
-	- artifacts/decisions.md ⚠ pending (record framework switch rationale and ASGI server choice)
+	- .specify/templates/spec-template.md ✅ updated (frontend requirement includes shadcn/ui adoption)
+	- .specify/templates/plan-template.md ✅ updated (Constitution Check references shadcn/ui component mandate)
+	- .specify/templates/tasks-template.md ✅ updated (frontend tasks include shadcn/ui implementation)
+	- README.md ⚠ pending (document shadcn/ui component requirement and Tailwind usage)
+	- artifacts/versions.md ⚠ pending (record shadcn/ui and Tailwind versions/links)
+	- artifacts/decisions.md ⚠ pending (capture shadcn/ui adoption rationale and migration plan)
 - Follow-up TODOs:
-	- Create artifacts/versions.md and artifacts/decisions.md; record FastAPI adoption and ASGI server choice (Uvicorn/Gunicorn)
-	- Review Dockerfile/compose to ensure ASGI server usage; update if needed
+	- Define Tailwind + shadcn/ui theming tokens and dark-mode strategy
+	- Inventory existing UI for migration to shadcn/ui primitives
 -->
 
-# Multi-RTSP Person Detection (Docker-only, amd64) Constitution
+# ProxiMeter: RTSP Object Detection Scoring for Home Automation (Docker-only, amd64) Constitution
 
 ## Core Principles
 
 ### I. Container-Only, Reproducible Runtime (NON-NEGOTIABLE)
 The application MUST run exclusively in Docker on linux/amd64. Images are
-multi-stage with a pinned base (python:3.12-slim-trixie), minimal OS packages,
-and a non-root user in the final image. Containers are stateless: the ONLY
-persisted file is `/app/config/config.yml`. No model caches or artifacts are
-persisted between runs. A HEALTHCHECK MUST probe `/health`.
+multi-stage with a pinned base (python:3.12-slim-trixie for backend), minimal OS
+packages, and a non-root user in the final image. Frontend MUST be built using
+Node.js LTS in a separate build stage and served as static assets from the
+backend. Containers are stateless: the ONLY persisted file is
+`/app/config/config.yml`. No model caches or artifacts are persisted between
+runs. A HEALTHCHECK MUST probe `/health`.
 
 Rationale: Determinism, portability, and secure-by-default execution.
 
-### II. Single Model, Many Streams with Backpressure Discipline
-Exactly one YOLO model is active at any time across multiple RTSP streams. Any
-model switch MUST gracefully restart inference workers without losing UI
-configuration in `config.yml`. Each stream is capped at 5 FPS (decode+inference)
-using frame skipping/backpressure to maintain real-time behavior.
+### II. Real-Time Object Detection with Polygon Zone Scoring
+Exactly one YOLO model is active at any time across multiple RTSP streams. Each
+stream is capped at 5 FPS (decode+inference) using frame skipping/backpressure to
+maintain real-time behavior. FFmpeg MUST be used for all RTSP stream ingestion,
+decoding, and frame extraction. Users MUST be able to define multiple polygon
+zones per stream via the UI. For each detected object within a zone, the system
+MUST calculate up to three optional scoring metrics: (1) distance from a target
+point, (2) normalized camera coordinates (x, y), and (3) bounding box size
+(width × height). Scores MUST be published in real-time to SSE and optionally to
+MQTT. The application is NOT a video recorder or NVR; no video storage or
+playback history is required beyond live viewing.
 
-Rationale: Predictable latency and resource fairness under load.
+Rationale: Focus on real-time scoring for home automation triggers, not archival
+video management. Polygon zones enable precise spatial filtering. Multiple
+scoring criteria provide flexibility for diverse automation scenarios.
 
 ### III. Explicit GPU Backend Contract and Fail-Fast Provisioning
 GPU backend is selected via `GPU_BACKEND ∈ {nvidia, amd, intel}`. `entrypoint.sh`
@@ -94,6 +104,39 @@ runners. The pipeline MUST:
 Rationale: Ensure reliable CI on standard runners while preserving production
 GPU guarantees through documented, off-CI validation.
 
+### VII. Scoring and Home Automation Integration
+The application's PRIMARY PURPOSE is real-time object detection scoring to
+trigger home automation workflows. Scores MUST be published via SSE (mandatory)
+and optionally via MQTT. Each score event MUST include: timestamp, stream_id,
+zone_id (if applicable), object_class, confidence, and up to three optional
+scoring values (distance, coordinates, size). Users define scoring behavior
+per-zone via the UI: which metrics to calculate, target points for distance
+calculation, and thresholds. The system MUST NOT store video recordings, frame
+history, or score archives beyond in-memory queues for real-time delivery. UI
+MUST provide tools to define/edit/delete polygon zones with visual overlays on
+live stream previews.
+
+Rationale: Clear product focus prevents scope creep into video storage/NVR
+functionality. SSE provides low-latency, browser-compatible streaming; MQTT
+enables integration with external automation platforms (Home Assistant, Node-RED,
+etc.). Polygon zones and flexible scoring criteria support diverse use cases
+(person detection at doorways, object tracking in driveways, etc.).
+
+### VIII. Frontend UI Consistency with shadcn/ui
+The React SPA MUST adopt shadcn/ui component primitives backed by Tailwind CSS
+configuration checked into the repo. All new UI MUST compose shadcn/ui
+components (extending via the `cn` utility when custom styling is required) and
+adhere to a shared design token set for spacing, typography, and state visuals.
+If an existing interface cannot migrate immediately, the plan MUST document a
+timeline and debt owner. Custom components MUST be built on top of shadcn/ui and
+respect accessible semantics (ARIA roles, keyboard navigation, color contrast).
+Global theming (light/dark) MUST be controlled through Tailwind tokens exposed by
+the shadcn/ui config.
+
+Rationale: shadcn/ui provides a consistent, accessible base for the SPA while
+aligning with Tailwind-powered styling. Mandating the design system prevents UI
+fragmentation, accelerates development, and enforces accessibility guardrails.
+
 ## Architecture & Execution Constraints
 
 - Container-only runtime on linux/amd64; no direct host execution.
@@ -106,25 +149,47 @@ GPU guarantees through documented, off-CI validation.
 	Weights are fetched at container start and exported to ONNX inside the
 	container to unify execution on amd64 across backends. Only one model is ever
 	loaded at a time.
-- Streams: RTSP CRUD via UI, validated at save; per-stream enable/disable and
-	optional thresholds/zones if provided. Enforce 5 FPS cap with backpressure.
-- Web API/UI: FastAPI application with APIRouter modules for UI, REST, stream
-	control, health, and metrics. Use Jinja2 templating (fastapi.templating)
-	for server-rendered pages as needed. Dark, responsive UI optimized for
-	mobile/touch.
+- Streams: RTSP CRUD via UI, validated at save; per-stream enable/disable.
+	Enforce 5 FPS cap with backpressure. FFmpeg MUST handle all RTSP ingestion,
+	decoding, and frame extraction. NO video recording or storage beyond live frames
+	for inference.
+- Polygon Zones: Per-stream zone management (CRUD) via UI with visual polygon
+	editor overlays on live stream preview. Each zone stores: name, point array
+	(polygon vertices), enabled scoring metrics (distance/coordinates/size), target
+	point (if distance scoring enabled), and active/inactive state. Zones persisted
+	in config.yml per stream.
+- Scoring Pipeline: For each inference frame, detect objects, filter by polygon
+	zones, calculate enabled scoring metrics per detected object, and emit score
+	events to SSE and optionally MQTT. No persistent score storage (real-time only).
+- Web API/UI: FastAPI backend application with APIRouter modules for REST API,
+	stream control, zone management, score streaming (SSE), health, and metrics.
+	Frontend MUST be a React TypeScript SPA with mandatory React 19.2, TypeScript
+	5+, and Vite for bundling. The component system MUST be implemented with
+	shadcn/ui on top of Tailwind CSS; custom elements MUST extend shadcn/ui tokens
+	and utilities (e.g., `cn`). Optional animation libraries MAY include
+	framer-motion, react-bits, aceternity UI, and motion-bits for enhanced UX.
+	Backend serves REST API only (no server-rendered templates). Frontend
+	communicates via REST/SSE. Dark, responsive UI optimized for mobile/touch with
+	polygon zone editor and shadcn/ui-consistent styling.
 - APIs & outputs:
-	- MQTT (optional): If `MQTT_ENABLED=true`, publish numeric score per stream to
-		`MQTT_HOST:MQTT_PORT` under `MQTT_TOPIC` with sensible QoS/retain and
-		metadata: `timestamp, stream_id, score, confidence, model_id`.
-	- HTTP score streaming (optional): If `HTTP_STREAM_ENABLED=true`, serve a
-		real-time endpoint at `HTTP_STREAM_PATH` using SSE or WebSocket. Message
-		schema MUST include `timestamp, stream_id, score, confidence, model_id`.
-	- Provide a GET endpoint to fetch the latest score snapshot per stream.
-- Base image policy: Use `python:3.12-slim-trixie` for amd64; multi-stage builds
-	compile wheels in a builder stage; final stage contains no compilers.
+	- SSE score streaming (mandatory): Serve real-time score events at a dedicated
+		SSE endpoint. Message schema MUST include: `timestamp, stream_id, zone_id (or
+		null), object_class, confidence, distance (optional), coordinates (optional),
+		size (optional)`.
+	- MQTT (optional): If `MQTT_ENABLED=true`, publish score events to
+		`MQTT_HOST:MQTT_PORT` under `MQTT_TOPIC` with sensible QoS/retain. Use same
+		schema as SSE.
+	- Provide REST endpoints for: stream CRUD, zone CRUD per stream, latest score
+		snapshot per stream/zone, stream status.
+- Base image policy: Use `python:3.12-slim-trixie` for backend amd64; use
+	`node:lts-slim` for frontend build stage; multi-stage builds compile wheels and
+	frontend assets in builder stages; final stage contains no compilers and serves
+	frontend static assets alongside backend API. FFmpeg MUST be installed in the
+	final runtime image.
 - Dockerfile standards: Non-root user, minimal OS packages, pinned base and
 	dependency versions, HEALTHCHECK for `/health`. Do not encode platform policy
-	in the Dockerfile (platform is enforced by build commands and CI).
+	in the Dockerfile (platform is enforced by build commands and CI). Frontend
+	build stage MUST produce optimized production bundle.
 - Observability & reliability: JSON logs, health, Prometheus metrics, graceful
 	shutdown, watchdog auto-reconnect with exponential backoff.
 - Security & hardening: Non-root, input validation, CSRF, rate-limit sensitive
@@ -147,20 +212,30 @@ GPU guarantees through documented, off-CI validation.
 	additional ports used.
 - Developer experience: Provide a Makefile for build, run, test, push; enforce
 	linux/amd64 flags and consistent tagging; include env var matrix and backend
-	support table in README plus Home Assistant examples.
+	support table in README plus Home Assistant examples. Support local frontend
+	development with hot-reload (Vite dev server proxying to backend). Document
+	frontend build process and technology stack (React, TypeScript, shadcn/ui,
+	Tailwind, optional animation libraries).
 
 ## Tooling & Evidence Requirements
 
 - During planning/implementation, agents MUST use SearXNG web search to resolve 
-    latest stable versions and installation guidance for CUDA/TensorRT (NVIDIA),
-	ROCm/MIVisionX (AMD), OpenVINO (Intel), ONNX Runtime, PyTorch/TorchAudio/
-	TorchVision (if used), FFmpeg/GStreamer components, FastAPI/ASGI & Docker, or any 
-    other not mentioned packages best practices.
+    latest stable versions and installation guidance for:
+	* Backend: CUDA/TensorRT (NVIDIA), ROCm/MIVisionX (AMD), OpenVINO (Intel), ONNX
+	  Runtime, PyTorch/TorchAudio/TorchVision (if used), **FFmpeg** (mandatory),
+	  FastAPI/ASGI, Python packages
+	* Frontend: **React 19.2** (mandatory), TypeScript 5+, Vite, Node.js LTS,
+	  shadcn/ui (mandatory), Tailwind CSS, framer-motion (optional), react-bits
+	  (optional), aceternity UI (optional), motion-bits (optional)
+	* Infrastructure: Docker, docker-compose best practices
+	* Polygon/geometry libraries: Shapely (Python) or equivalent for point-in-polygon
+	  checks and geometric calculations
 - Agents MUST ingest and reference official documentation pages before pinning
 	versions or commands, use the Context7 tool to look up documentation.
 - Agents MUST record resolved versions and documentation URLs in
 	`artifacts/versions.md` and implement `--version` checks in `entrypoint.sh` to
-	emit versions at startup.
+	emit versions at startup (backend: Python, FastAPI, FFmpeg, GPU runtimes;
+	frontend: Node, React, TypeScript versions logged during build).
 - If conflicts or deprecations are discovered, agents MUST prefer the most
 	recent stable docs and explicitly document trade-offs in
 	`artifacts/decisions.md`.
@@ -179,15 +254,25 @@ GPU guarantees through documented, off-CI validation.
 - Compliance review: Every PR MUST include a "Constitution Check" confirming:
 	- Docker-only amd64, single-model/multi-stream at 5 FPS cap, and env/config
 		contract are preserved.
+	- Application purpose is object detection scoring for home automation (NOT NVR/
+		recording); no video storage beyond live inference frames.
+	- FFmpeg is used for all RTSP stream processing; version is validated and logged.
 	- GPU backend fail-fast behavior and no fallback are preserved.
+	- Frontend is React 19.2 TypeScript SPA with Vite and composes shadcn/ui
+		components on Tailwind CSS; backend is REST API + SSE only (no server-rendered
+		templates).
+	- Polygon zone management (CRUD, visual editor) and scoring pipeline (distance,
+		coordinates, size) are functional.
+	- SSE score streaming is mandatory; MQTT is optional; both use consistent schema.
 	- Observability (JSON logs, metrics, health) and security controls (rate-limit,
 		input validation, non-root) are intact; no-auth and LAN-only posture is
 		documented; no WAN exposure examples are introduced.
-	- CI enforces linux/amd64-only builds; Dockerfile standards are met.
+	- CI enforces linux/amd64-only builds; Dockerfile standards are met; multi-stage
+		build includes frontend production bundle.
 	- Tests are updated and passing on CPU-only CI. If optional GPU smoke tests are
 		performed out-of-band, record outcomes; if not available, record the
 		limitation in `artifacts/decisions.md`.
 	- Tooling & Evidence artifacts (`artifacts/versions.md`, `decisions.md`) are
-		maintained and `entrypoint.sh` emits versions.
+		maintained and `entrypoint.sh` emits versions (including FFmpeg).
 
-**Version**: 2.1.0 | **Ratified**: 2025-10-17 | **Last Amended**: 2025-10-17
+**Version**: 2.4.0 | **Ratified**: 2025-10-17 | **Last Amended**: 2025-10-21

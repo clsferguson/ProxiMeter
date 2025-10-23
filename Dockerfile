@@ -1,6 +1,18 @@
 # syntax=docker/dockerfile:1.7-labs
-FROM python:3.12-slim-trixie as base
 
+FROM node:20.18.0-bookworm-slim AS frontend-deps
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+
+FROM frontend-deps AS frontend-build
+COPY frontend/ ./
+ENV NODE_ENV=production
+# Frontend uses hardcoded relative API path '/api' (see frontend/src/lib/constants.ts)
+# No build-time API URL configuration needed
+RUN npm run build
+
+FROM python:3.12-slim-trixie AS python-base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -8,8 +20,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install system dependencies for OpenCV
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
@@ -18,23 +30,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Install runtime deps
 COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt
 
-# Create non-root user
 RUN useradd -m -u 10001 appuser
 
-# Copy app and entrypoint
 COPY src ./src
 COPY entrypoint.sh ./entrypoint.sh
 
-# Make entrypoint executable
 RUN chmod +x /app/entrypoint.sh
 
-# Config directory (persist via volume)
 RUN mkdir -p /app/config && chown -R appuser:appuser /app
+RUN mkdir -p /app/src/app/static/frontend
+ENV STATIC_ROOT=/app/src/app/static/frontend
+
+COPY --from=frontend-build /app/frontend/dist /app/src/app/static/frontend
+
 VOLUME ["/app/config"]
 
 USER appuser

@@ -32,23 +32,26 @@
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
 - Docker-only runtime on linux/amd64; no host execution paths
+- Application purpose: object detection scoring for home automation (NOT NVR/recording); no video storage
 - Single active YOLO model; multi-RTSP with enforced 5 FPS per stream
+- FFmpeg MUST be used for all RTSP stream ingestion, decoding, and frame extraction
+- Polygon zone management: per-stream CRUD with visual editor; zones define scoring areas
+- Scoring pipeline: calculate distance/coordinates/size for detected objects in zones; real-time only (no storage)
+- SSE score streaming is mandatory; MQTT is optional
 - Env contract honored: APP_PORT, GPU_BACKEND, YOLO_MODEL, IMAGE_SIZE,
-  MQTT_ENABLED, MQTT_HOST, MQTT_PORT, MQTT_TOPIC, HTTP_STREAM_ENABLED,
-  HTTP_STREAM_PATH
-- Persist ONLY /app/config/config.yml via volume; no model caches/artifacts
+  MQTT_ENABLED, MQTT_HOST, MQTT_PORT, MQTT_TOPIC
+- Persist ONLY /app/config/config.yml via volume; no model caches/artifacts or video storage
 - GPU backend provisioning is fail-fast (no fallback) and versions emitted
+- Frontend MUST be React 19.2 TypeScript SPA with Vite that composes shadcn/ui components on Tailwind CSS; backend REST API + SSE only (no templates)
 - Observability: JSON logs, /health, Prometheus metrics present
-- Security: non-root, input validation, CSRF, rate-limits; file I/O restricted
 - Security: non-root, input validation, rate-limits; file I/O restricted; no authentication (LAN-only; DO NOT expose to WAN)
-- CI/build: buildx with --platform=linux/amd64; healthcheck in image
-- CI/build: buildx with --platform=linux/amd64; healthcheck in image
+- CI/build: buildx with --platform=linux/amd64; healthcheck in image; multi-stage build with frontend production bundle
 - CI runners: GitHub-hosted CPU-only; pipeline MUST NOT require GPU devices or drivers
 - CI dry-run: set CI_DRY_RUN=true to bypass GPU checks while verifying startup and /health
 - Tests in CI: CPU-only with synthetic inputs; avoid large model downloads unless cached
 - GPU smoke tests: off-CI only (manual or self-hosted GPU runner) and documented runbook
-- Tooling evidence: artifacts/versions.md updated; decisions recorded; entrypoint
-  prints runtime stack versions
+- Tooling evidence: artifacts/versions.md updated (include FFmpeg, React 19.2, TypeScript, Node.js, polygon libs); decisions recorded; entrypoint
+  prints runtime stack versions (including FFmpeg)
 
 ## Project Structure
 
@@ -97,8 +100,14 @@ frontend/
 ├── src/
 │   ├── components/
 │   ├── pages/
-│   └── services/
-└── tests/
+│   ├── hooks/
+│   ├── services/
+│   └── lib/
+├── tests/
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+└── index.html
 
 # [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
 api/

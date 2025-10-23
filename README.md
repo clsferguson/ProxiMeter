@@ -1,10 +1,16 @@
-# ProxiMeter — RTSP Stream Manager
+# ProxiMeter — RTSP Object Detection Scoring for Home Automation
 
-A FastAPI web application for managing and viewing RTSP camera streams. Add, edit, reorder, and delete streams with a clean web interface. View live streams at ≤5 FPS via MJPEG playback.
+A FastAPI + React TypeScript application for real-time object detection scoring on RTSP camera streams. Create polygon zones, define scoring criteria (distance, coordinates, size), and stream scores to home automation systems via SSE or MQTT. NOT a video recorder or NVR.
 
-- Tech: Python 3.12, FastAPI, Uvicorn, Jinja2, Pydantic v2, PyYAML, OpenCV
-- Features: Add/Edit/Delete/Reorder RTSP streams, Live MJPEG playback (≤5 FPS), Persistent YAML storage
-- Endpoints: `/` (Landing UI), `/api/streams` (REST API), `/play/{id}.mjpg` (Playback), `/health` (Readiness), `/metrics` (Prometheus)
+- **Backend**: Python 3.12, FastAPI, Uvicorn, Pydantic v2, PyYAML, FFmpeg (RTSP processing), Shapely (polygon geometry)
+- **Frontend**: React 19.2, TypeScript 5+, Vite, Tailwind CSS, shadcn/ui component system (optional animation: framer-motion, react-bits, aceternity UI, motion-bits)
+- **Features**: 
+  - RTSP stream management (add/edit/delete)
+  - Polygon zone editor with visual overlays on live stream preview
+  - Real-time object detection scoring: distance from target, camera coordinates, bounding box size
+  - SSE score streaming (mandatory) + optional MQTT publishing
+  - NO video recording or storage (live frames only for inference)
+- **Endpoints**: `/` (React SPA), `/api/streams` (REST), `/api/zones` (REST), `/api/scores/stream` (SSE), `/health`, `/metrics`
 - **Security Warning**: LAN-only deployment; no authentication. RTSP credentials stored in plaintext. Do NOT expose to the internet without proper hardening.
 
 ## Quick Start
@@ -58,42 +64,132 @@ APP_PORT=8080 docker compose up --build
 
 Or edit `docker-compose.yml` and change the ports mapping.
 
+### Frontend Development Workflow
+
+Use the Vite development server for rapid UI iteration. The frontend uses Tailwind CSS and the shadcn/ui component library.
+
+```bash
+cd frontend
+npm install
+npx shadcn@latest init # idempotent: ensures shadcn config is up to date
+npm run dev
+```
+
+The dev server runs on `http://localhost:5173` and proxies API calls to the backend (configured in `vite.config.ts`).
+
+#### Tailwind CSS & shadcn/ui Guidelines
+
+**Design Tokens**:
+- Tailwind tokens are defined in `tailwind.config.ts`; extend this file instead of writing ad-hoc CSS.
+- Use Tailwind utilities for spacing, colors, typography, and responsive breakpoints.
+- Breakpoints: `sm` (640px), `md` (768px), `lg` (1024px), `xl` (1280px), `2xl` (1536px).
+- Minimum touch target size: `44x44px` (use `h-11 w-11` or equivalent Tailwind spacing).
+
+**Component Architecture**:
+- UI primitives live under `src/components/ui/` and are generated via `npx shadcn@latest add <component>`.
+- Custom components SHOULD compose shadcn/ui exports and utilities such as `cn` for class merging.
+- Use `class-variance-authority` (CVA) for component variants; see shadcn/ui examples.
+- Global theming (light/dark) is managed through the `ThemeProvider` established in `main.tsx`.
+
+**Adding New Components**:
+```bash
+cd frontend
+npx shadcn@latest add button  # Adds Button component to src/components/ui/button.tsx
+npx shadcn@latest add card    # Adds Card component
+npx shadcn@latest add dialog  # Adds Dialog component
+```
+
+**Component Documentation**:
+- Document prop types and shadcn/ui primitives used in JSDoc comments.
+- Example:
+  ```typescript
+  /**
+   * StreamCard - Displays a single RTSP stream with status and actions.
+   * Composes shadcn/ui Card, Badge, Button, and DropdownMenu primitives.
+   * @param stream - Stream object with id, name, url, status
+   * @param onEdit - Callback when edit button is clicked
+   * @param onDelete - Callback when delete button is clicked
+   */
+  export function StreamCard({ stream, onEdit, onDelete }: StreamCardProps) {
+    // ...
+  }
+  ```
+
+#### TypeScript & Code Quality
+
+- **Strict Mode**: TypeScript strict mode is enabled in `tsconfig.json`. All types must be explicit.
+- **Linting**: ESLint with Tailwind CSS and accessibility plugins. Run `npm run lint` to check.
+- **Formatting**: Prettier is configured. Run `npm run format` to auto-format code.
+- **Testing**: Vitest + React Testing Library. Run `npm run test` to execute tests.
+
+#### Build & Optimization
+
+- **Production Build**: `npm run build` creates an optimized bundle in `dist/`.
+- **Bundle Size**: Target <500KB gzipped. Tree-shake unused shadcn/ui components by importing only what you use.
+- **Environment Variables**: Frontend uses hardcoded API base URL `/api` (relative path). No build-time configuration needed.
+
+#### Common Tasks
+
+```bash
+cd frontend
+
+# Development
+npm run dev              # Start Vite dev server (http://localhost:5173)
+npm run build           # Build production bundle
+npm run preview         # Preview production build locally
+
+# Code Quality
+npm run lint            # Run ESLint
+npm run format          # Format code with Prettier
+npm run test            # Run Vitest tests
+npm run test:ui         # Run tests with UI
+
+# shadcn/ui
+npx shadcn@latest add <component>  # Add a new component
+npx shadcn@latest list             # List available components
+```
+
 ## Project Structure
 
 ```
-src/app/
-  wsgi.py                    # FastAPI ASGI application entry point
-  config_io.py               # YAML persistence (atomic writes)
-  logging_config.py          # JSON logging configuration
-  metrics.py                 # Prometheus metrics
-  api/
-    health.py                # Health endpoint
-    streams.py               # REST API for streams + playback
-    errors.py                # Error schemas and handlers
-  ui/
-    views.py                 # UI routes (landing, add, edit)
-  models/
-    stream.py                # Pydantic models (Stream, NewStream, EditStream)
-  services/
-    streams_service.py       # Business logic for stream management
-  utils/
-    rtsp.py                  # RTSP/MJPEG playback utilities
-    validation.py            # RTSP URL validation
-    strings.py               # Credential masking helpers
-  middleware/
-    rate_limit.py            # Rate limiting middleware
-    request_id.py            # Request ID middleware
-  templates/
-    base.html                # Base layout with header animation
-    index.html               # Landing page (stream list)
-    add_stream.html          # Add stream form
-    edit_stream.html         # Edit stream form
-    play.html                # Playback view
-  static/
-    styles.css               # CSS (header animation, equal-width grid)
-    app.js                   # Client-side JS (animations, drag-drop, delete confirm)
+backend/
+  src/app/
+    main.py                    # FastAPI ASGI application entry point
+    config_io.py               # YAML persistence (atomic writes)
+    logging_config.py          # JSON logging configuration
+    metrics.py                 # Prometheus metrics
+    api/
+      health.py                # Health endpoint
+      streams.py               # REST API for streams + playback
+      errors.py                # Error schemas and handlers
+    models/
+      stream.py                # Pydantic models (Stream, NewStream, EditStream)
+    services/
+      streams_service.py       # Business logic for stream management
+    utils/
+      rtsp.py                  # FFmpeg-based RTSP/MJPEG playback utilities
+      validation.py            # RTSP URL validation with FFmpeg probe
+      strings.py               # Credential masking helpers
+    middleware/
+      rate_limit.py            # Rate limiting middleware
+      request_id.py            # Request ID middleware
+  tests/                       # Backend tests
+
+frontend/
+  src/
+    components/                # React components
+    pages/                     # Page components (landing, add, edit, play)
+    hooks/                     # Custom React hooks
+    services/                  # API client services
+    lib/                       # Utility functions
+  tests/                       # Frontend tests
+  package.json
+  tsconfig.json
+  vite.config.ts
+  index.html
+
 config/
-  config.yml                 # Stream persistence (mounted volume)
+  config.yml                   # Stream persistence (mounted volume)
 ```
 
 ## API Endpoints
@@ -135,10 +231,11 @@ config/
 
 ### UI/UX
 
+- **Design system**: shadcn/ui primitives on Tailwind CSS ensure consistent spacing, typography, and theming.
 - **Header animation**: Centered on landing, animates to top-left on playback (400-700ms)
 - **Equal-width buttons**: Stream buttons in responsive grid (same width per row)
 - **Mobile-friendly**: Responsive layout
-- **Accessibility**: Keyboard navigation, ARIA labels, focus management
+- **Accessibility**: Keyboard navigation, ARIA labels, focus management baked into shadcn/ui components
 
 ## CI/CD
 

@@ -10,6 +10,304 @@
 
 ## Architecture Decisions
 
+### ADR-011: Adopt Tailwind CSS + shadcn/ui Design System
+
+**Status**: Accepted  
+**Date**: 2025-10-21  
+**Branch**: 003-frontend-react-migration  
+**Spec**: `specs/003-frontend-react-migration/spec.md`
+
+**Context**:
+The React frontend migrated from server-rendered templates to a TypeScript SPA. Existing CSS was ad-hoc and difficult to scale across new polygon editor and scoring workflows. The constitution v2.4.0 mandates a standardized component system to maintain accessibility, responsiveness, and consistent styling.
+
+**Decision**:
+Adopt Tailwind CSS as the utility foundation and shadcn/ui (Tailwind + Radix UI primitives) as the component library for all React UI work.
+
+**Rationale**:
+1. **Consistency**: shadcn/ui enforces unified spacing, typography, and state styling across the SPA.
+2. **Accessibility**: Components ship with ARIA, keyboard navigation, and color contrast defaults.
+3. **Velocity**: CLI-driven component scaffolding accelerates feature delivery.
+4. **Composition**: Tailwind utilities plus `class-variance-authority` allow custom variants without bespoke CSS files.
+5. **Governance Alignment**: Satisfies Constitution Principle VIII and compliance checklist.
+
+**Consequences**:
+- ✅ Shared design tokens defined in `tailwind.config.ts` replace scattered CSS.
+- ✅ New UI components live under `frontend/src/components/ui/` generated via `npx shadcn add`.
+- ✅ Global theming delivered by the shadcn/ui `ThemeProvider` with dark/light modes.
+- ⚠️ Requires Tailwind build tooling in Vite and Docker image.
+- ⚠️ Existing legacy styles must be migrated or removed to avoid conflicts.
+
+**Implementation Notes**:
+- Tailwind/Tailwind Merge/Class Variance Authority configured during project initialization.
+- `lucide-react` provides iconography referenced by shadcn/ui components.
+- React Hook Form + Zod integrated with shadcn/ui form primitives for validation UX.
+- README documents setup and contribution guidelines; tasks.md updated with migration work items.
+
+**Alternatives Considered**:
+- **Plain Tailwind + custom components**: Rejected due to higher maintenance burden and inconsistent accessibility.
+- **Material UI / Chakra UI**: Rejected to avoid heavy runtime styling systems and to stay aligned with Tailwind utility-first approach.
+- **Continue legacy CSS**: Rejected due to Constitution compliance requirements and scalability concerns.
+
+---
+
+## Design System Reference
+
+### Tailwind Design Tokens
+
+All design tokens are centralized in `frontend/tailwind.config.ts` and `frontend/src/styles/tailwind.css`. This ensures consistency across the application.
+
+#### Color Palette
+
+**Primary Colors** (from shadcn/ui defaults):
+- `primary`: `hsl(222.2 47.6% 11.2%)` - Dark blue (default theme)
+- `primary-foreground`: `hsl(210 40% 98%)` - Light text on primary
+- `secondary`: `hsl(210 40% 96%)` - Light gray
+- `secondary-foreground`: `hsl(222.2 47.6% 11.2%)` - Dark text on secondary
+
+**Semantic Colors**:
+- `destructive`: `hsl(0 84.2% 60.2%)` - Red for delete/error actions
+- `destructive-foreground`: `hsl(210 40% 98%)` - Light text on destructive
+- `success`: `hsl(142.3 71.8% 29.2%)` - Green for success states
+- `warning`: `hsl(38.6 92.1% 50.2%)` - Amber for warnings
+- `info`: `hsl(217.2 91.2% 59.8%)` - Blue for informational messages
+
+**Neutral Colors**:
+- `background`: `hsl(0 0% 100%)` - White (light mode)
+- `foreground`: `hsl(222.2 84% 5%)` - Near-black text
+- `muted`: `hsl(210 40% 96%)` - Disabled/secondary text
+- `muted-foreground`: `hsl(215.4 16.3% 46.9%)` - Muted text color
+- `border`: `hsl(214.3 31.8% 91.4%)` - Border color
+- `input`: `hsl(214.3 31.8% 91.4%)` - Input field background
+- `ring`: `hsl(222.2 84% 5%)` - Focus ring color
+
+**Dark Mode**:
+- Automatically inverted via `next-themes` ThemeProvider
+- All colors have dark mode equivalents in `tailwind.config.ts`
+
+#### Spacing Scale
+
+Tailwind's default spacing scale (4px base unit):
+- `0` = 0px
+- `1` = 4px
+- `2` = 8px
+- `3` = 12px
+- `4` = 16px
+- `6` = 24px
+- `8` = 32px
+- `12` = 48px
+- `16` = 64px
+
+**Touch Target Minimum**: All interactive elements use minimum `h-10 w-10` (40px) for mobile accessibility.
+
+#### Typography
+
+**Font Family**:
+- `font-sans`: System font stack (Segoe UI, Roboto, etc.)
+- `font-mono`: Monospace for code (Monaco, Courier New, etc.)
+
+**Font Sizes**:
+- `text-xs`: 12px (captions, badges)
+- `text-sm`: 14px (secondary text, form labels)
+- `text-base`: 16px (body text, default)
+- `text-lg`: 18px (section headings)
+- `text-xl`: 20px (page headings)
+- `text-2xl`: 24px (major headings)
+
+**Font Weights**:
+- `font-normal`: 400 (body text)
+- `font-medium`: 500 (labels, emphasis)
+- `font-semibold`: 600 (headings)
+- `font-bold`: 700 (strong emphasis)
+
+#### Border Radius
+
+- `rounded-none`: 0px
+- `rounded-sm`: 2px (subtle)
+- `rounded-md`: 6px (default for buttons/cards)
+- `rounded-lg`: 8px (larger components)
+- `rounded-full`: 9999px (pills, avatars)
+
+#### Shadows
+
+- `shadow-sm`: Subtle elevation
+- `shadow-md`: Default elevation (cards, modals)
+- `shadow-lg`: Strong elevation (dropdowns, tooltips)
+- `shadow-xl`: Maximum elevation (modals, popovers)
+
+### Component Mapping
+
+#### Form Components
+
+| Component | Location | Tailwind Tokens | Notes |
+|-----------|----------|-----------------|-------|
+| `Button` | `ui/button.tsx` | `bg-primary`, `text-primary-foreground`, `h-10 px-4` | Variants: default, secondary, destructive, outline, ghost |
+| `Input` | `ui/input.tsx` | `border`, `bg-background`, `text-foreground` | Inherits Tailwind form styling |
+| `Label` | `ui/label.tsx` | `text-sm font-medium` | Associated with form inputs via `htmlFor` |
+| `Select` | `ui/select.tsx` | `border`, `bg-background` | Radix UI primitive with Tailwind styling |
+| `Textarea` | `ui/textarea.tsx` | `border`, `bg-background`, `text-foreground` | Resizable text input |
+| `Checkbox` | `ui/checkbox.tsx` | `border`, `bg-primary` | Radix UI primitive |
+| `Radio Group` | `ui/radio-group.tsx` | `border`, `bg-primary` | Radix UI primitive |
+
+#### Layout Components
+
+| Component | Location | Tailwind Tokens | Notes |
+|-----------|----------|-----------------|-------|
+| `Card` | `ui/card.tsx` | `bg-background`, `border`, `rounded-lg`, `shadow-md` | Container for grouped content |
+| `Dialog` | `ui/dialog.tsx` | `bg-background`, `shadow-xl` | Modal overlay with Radix UI |
+| `Alert Dialog` | `ui/alert-dialog.tsx` | `bg-background`, `shadow-xl` | Confirmation dialogs |
+| `Tabs` | `ui/tabs.tsx` | `border-b`, `text-muted-foreground` | Tabbed content navigation |
+| `Accordion` | `ui/accordion.tsx` | `border`, `text-foreground` | Collapsible sections |
+
+#### Feedback Components
+
+| Component | Location | Tailwind Tokens | Notes |
+|-----------|----------|-----------------|-------|
+| `Alert` | `ui/alert.tsx` | `bg-secondary`, `border-l-4`, `text-foreground` | Variants: default, destructive, success, warning |
+| `Badge` | `ui/badge.tsx` | `bg-primary`, `text-primary-foreground`, `text-xs` | Status indicators |
+| `Toast` | `sonner` | `bg-background`, `border`, `shadow-lg` | Notifications via Sonner library |
+
+#### Navigation Components
+
+| Component | Location | Tailwind Tokens | Notes |
+|-----------|----------|-----------------|-------|
+| `Dropdown Menu` | `ui/dropdown-menu.tsx` | `bg-background`, `border`, `shadow-md` | Radix UI primitive |
+| `Navigation Menu` | `ui/navigation-menu.tsx` | `border-b`, `text-foreground` | Horizontal navigation |
+
+### Custom Component Patterns
+
+When creating new components, follow these patterns:
+
+#### Using Class Variance Authority (CVA)
+
+```typescript
+import { cva, type VariantProps } from 'class-variance-authority'
+import { cn } from '@/lib/utils'
+
+const componentVariants = cva(
+  // Base classes applied to all variants
+  'inline-flex items-center justify-center rounded-md font-medium transition-colors',
+  {
+    variants: {
+      variant: {
+        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
+        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
+        destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
+        outline: 'border border-input bg-background hover:bg-accent',
+        ghost: 'hover:bg-accent hover:text-accent-foreground',
+      },
+      size: {
+        sm: 'h-8 px-3 text-xs',
+        md: 'h-10 px-4 text-sm',
+        lg: 'h-12 px-6 text-base',
+      },
+    },
+    defaultVariants: {
+      variant: 'default',
+      size: 'md',
+    },
+  }
+)
+
+interface ComponentProps extends VariantProps<typeof componentVariants> {
+  children: React.ReactNode
+}
+
+export function Component({ variant, size, children }: ComponentProps) {
+  return <div className={componentVariants({ variant, size })}>{children}</div>
+}
+```
+
+#### Responsive Design
+
+Use Tailwind's responsive prefixes for mobile-first design:
+
+```typescript
+// Mobile-first: base styles apply to all sizes
+// Then override for larger screens
+<div className="text-sm md:text-base lg:text-lg">
+  Responsive text
+</div>
+
+// Responsive spacing
+<div className="p-4 md:p-6 lg:p-8">
+  Responsive padding
+</div>
+
+// Responsive grid
+<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+  Grid items
+</div>
+```
+
+#### Dark Mode Support
+
+All components automatically support dark mode via `next-themes`:
+
+```typescript
+// Colors automatically invert in dark mode
+<div className="bg-background text-foreground">
+  Works in both light and dark modes
+</div>
+
+// Explicit dark mode classes if needed
+<div className="bg-white dark:bg-slate-950">
+  Explicit dark mode override
+</div>
+```
+
+### Adding New Components
+
+To add a new shadcn/ui component:
+
+```bash
+npx shadcn@latest add <component-name>
+```
+
+This will:
+1. Download the component source from the shadcn/ui registry
+2. Place it in `frontend/src/components/ui/<component-name>.tsx`
+3. Update `package.json` dependencies if needed
+4. Automatically use the configured Tailwind tokens
+
+**Common Components**:
+- `npx shadcn@latest add tooltip` - Hover tooltips
+- `npx shadcn@latest add popover` - Floating popovers
+- `npx shadcn@latest add sheet` - Side drawer
+- `npx shadcn@latest add command` - Command palette
+- `npx shadcn@latest add calendar` - Date picker
+- `npx shadcn@latest add slider` - Range slider
+
+### Theming
+
+The application uses `next-themes` for light/dark mode switching:
+
+```typescript
+// In App.tsx
+import { ThemeProvider } from '@/components/theme-provider'
+
+export function App() {
+  return (
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+      {/* App content */}
+    </ThemeProvider>
+  )
+}
+
+// In components
+import { useTheme } from 'next-themes'
+
+export function ThemeToggle() {
+  const { theme, setTheme } = useTheme()
+  return (
+    <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+      Toggle theme
+    </button>
+  )
+}
+```
+
+---
+
 ### ADR-001: FastAPI Migration from Flask
 
 **Status**: Accepted  

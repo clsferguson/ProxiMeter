@@ -8,6 +8,7 @@ echo "FastAPI version: $(python -c 'import fastapi; print(fastapi.__version__)' 
 echo "Uvicorn version: $(python -c 'import uvicorn; print(uvicorn.__version__)' 2>/dev/null || echo 'unknown')"
 echo "OpenCV version: $(python -c 'import cv2; print(cv2.__version__)' 2>/dev/null || echo 'unknown')"
 echo "Pydantic version: $(python -c 'import pydantic; print(pydantic.__version__)' 2>/dev/null || echo 'unknown')"
+echo "FFmpeg version: $(ffmpeg -version 2>/dev/null | head -1 || echo 'unknown')"
 echo "==============================="
 
 # Check for CI_DRY_RUN mode
