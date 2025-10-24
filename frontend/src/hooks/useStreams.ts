@@ -12,6 +12,13 @@ interface UseStreamsOptions {
   pollInterval?: number
 }
 
+/**
+ * Type for SSE score data received from the server
+ */
+interface ScoreData {
+  [key: string]: unknown
+}
+
 interface UseStreamsReturn {
   streams: StreamResponse[]
   isLoading: boolean
@@ -48,22 +55,38 @@ export function useStreams(options: UseStreamsOptions = {}): UseStreamsReturn {
     }
   }, [])
 
-  // Add scores state
-  const [scores, setScores] = useState<Record<string, any>>({})
+  // Add scores state with proper typing
+  const [scores, setScores] = useState<Record<string, ScoreData>>({})
 
   useEffect(() => {
+    const eventSources: Record<string, EventSource> = {}
+
     streams.forEach(s => {
       if (s.status === 'running' && !scores[s.id]) {
         const eventSource = new EventSource(`/api/streams/${s.id}/scores`)
-        eventSource.onmessage = (event) => {
-          const data = JSON.parse(event.data)
-          setScores(prev => ({...prev, [s.id]: data}))
+        eventSources[s.id] = eventSource
+
+        eventSource.onmessage = (event: MessageEvent) => {
+          try {
+            const data = JSON.parse(event.data) as ScoreData
+            setScores(prev => ({...prev, [s.id]: data}))
+          } catch (parseError) {
+            console.error('Failed to parse SSE data:', parseError)
+          }
         }
-        eventSource.onerror = () => eventSource.close()
+
+        eventSource.onerror = () => {
+          eventSource.close()
+          delete eventSources[s.id]
+        }
       }
     })
-  }, [streams])
 
+    // Cleanup function to close all EventSource connections
+    return () => {
+      Object.values(eventSources).forEach(es => es.close())
+    }
+  }, [streams, scores])
 
   const createStream = useCallback(async (data: NewStreamRequest): Promise<StreamResponse> => {
     try {

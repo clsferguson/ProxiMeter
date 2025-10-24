@@ -81,11 +81,18 @@ const streamFormSchema = z.object({
 
 type StreamFormData = z.infer<typeof streamFormSchema>
 
+/**
+ * Type for the transformed submission data with ffmpeg_params as string array
+ */
+type StreamSubmitData = Omit<StreamFormData, 'ffmpeg_params'> & {
+  ffmpeg_params: string[]
+}
+
 interface StreamFormProps {
   /** Initial values for edit mode, undefined for add mode */
   initialValues?: StreamResponse
   /** Callback when form is submitted successfully */
-  onSubmit: (data: StreamFormData) => Promise<void>
+  onSubmit: (data: StreamSubmitData) => Promise<void>
   /** Whether the form is currently submitting */
   isLoading?: boolean
   /** Error message to display */
@@ -151,12 +158,12 @@ export function StreamForm({
   const handleSubmit = async (data: StreamFormData) => {
     try {
       setSubmitError(null)
-      // Transform ffmpeg_params string to array
-      const transformedData = {
+      // Transform ffmpeg_params string to array with proper typing
+      const transformedData: StreamSubmitData = {
         ...data,
         ffmpeg_params: data.ffmpeg_params ? data.ffmpeg_params.split(' ').filter(Boolean) : []
       }
-      await onSubmit(transformedData as any)
+      await onSubmit(transformedData)
       // Navigation happens in parent component after successful submission
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save stream'

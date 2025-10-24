@@ -16,7 +16,6 @@ from ..utils.rtsp import probe_rtsp_stream, build_ffmpeg_command, validate_rtsp_
 
 logger = logging.getLogger(__name__)
 
-
 class StreamsService:
     """Service for managing streams with validation and persistence."""
     
@@ -42,8 +41,14 @@ class StreamsService:
         streams.sort(key=lambda s: s.get("order", 0))
         return streams
     
-    async def create_stream(self, name: str, rtsp_url: str, hw_accel_enabled: bool = True,
-                        ffmpeg_params: Optional[list[str]] = None, target_fps: int = 5) -> dict:
+    async def create_stream(
+        self,
+        name: str,
+        rtsp_url: str,
+        hw_accel_enabled: bool = True,
+        ffmpeg_params: Optional[List[str]] = None,
+        target_fps: int = 5
+    ) -> dict:
         """Create a new stream with validation.
         
         Args:
@@ -83,6 +88,8 @@ class StreamsService:
         # Probe RTSP stream (2s timeout)
         logger.info(f"Probing RTSP stream: {rtsp_url}")
         is_reachable = await probe_rtsp_stream(rtsp_url, timeout_seconds=2.0)
+        if not is_reachable:
+            logger.warning(f"RTSP URL not reachable: {rtsp_url}")
         
         # Create stream object
         stream = Stream(
@@ -90,7 +97,7 @@ class StreamsService:
             name=name,
             rtsp_url=rtsp_url,
             hw_accel_enabled=hw_accel_enabled,
-            ffmpeg_params=ffmpeg_params or self.default_ffmpeg_params(),  # Add default method
+            ffmpeg_params=ffmpeg_params or self.default_ffmpeg_params(),
             target_fps=target_fps,
             created_at=datetime.utcnow().isoformat() + "Z",
             order=len(streams),
@@ -119,11 +126,16 @@ class StreamsService:
                 return stream
         return None
     
-    async def update_stream(self, stream_id: str, name: Optional[str] = None, 
-                          rtsp_url: Optional[str] = None, status: Optional[str] = None,
-                          hw_accel_enabled: Optional[bool] = None, 
-                          ffmpeg_params: Optional[List[str]] = None, 
-                          target_fps: Optional[int] = None) -> Optional[dict]:
+    async def update_stream(
+        self,
+        stream_id: str,
+        name: Optional[str] = None,
+        rtsp_url: Optional[str] = None,
+        status: Optional[str] = None,
+        hw_accel_enabled: Optional[bool] = None,
+        ffmpeg_params: Optional[List[str]] = None,
+        target_fps: Optional[int] = None
+    ) -> Optional[dict]:
         """Update a stream (partial update).
         
         Args:
@@ -175,27 +187,35 @@ class StreamsService:
         if rtsp_url is not None:
             rtsp_url = rtsp_url.strip()
             
-        # Validate RTSP URL format
-        is_valid, error_msg = validate_rtsp_url_format(rtsp_url)
-        if not is_valid:
-            raise ValueError(error_msg)
+            # Validate RTSP URL format
+            is_valid, error_msg = validate_rtsp_url_format(rtsp_url)
+            if not is_valid:
+                raise ValueError(error_msg)
+            
+            stream["rtsp_url"] = rtsp_url
+            url_changed = True
         
-        stream["rtsp_url"] = rtsp_url
-        url_changed = True        if hw_accel_enabled is not None:
+        # Update hardware acceleration if provided
+        if hw_accel_enabled is not None:
             stream["hw_accel_enabled"] = hw_accel_enabled
-
+        
+        # Update FFmpeg params if provided
         if ffmpeg_params is not None:
             stream["ffmpeg_params"] = ffmpeg_params
-
+        
+        # Update target FPS if provided
         if target_fps is not None:
+            if not (1 <= target_fps <= 30):
+                raise ValueError("Target FPS must be between 1 and 30")
             stream["target_fps"] = target_fps
-
+        
         # Re-probe if URL changed
         if url_changed:
             logger.info(f"Re-probing RTSP stream {stream_id} after URL change")
             is_reachable = await probe_rtsp_stream(stream["rtsp_url"], timeout_seconds=2.0)
-            stream["status"] = "Active" if is_reachable else "Inactive"
-            logger.info(f"Stream {stream_id} status updated to {stream['status']}")
+            # Note: Don't auto-update status here, let the caller control it
+            if not is_reachable:
+                logger.warning(f"Updated RTSP URL not reachable for stream {stream_id}")
         
         # Update status if provided
         if status is not None:
@@ -217,6 +237,10 @@ class StreamsService:
         Returns:
             True if deleted, False if not found
         """
+        # Stop stream if running
+        if stream_id in self.active_processes:
+            await self.stop_stream(stream_id)
+        
         # Load existing streams
         streams = load_streams()
         
@@ -329,51 +353,68 @@ class StreamsService:
             rtsp_url=url,
             ffmpeg_params=params,
             target_fps=fps,
-            gpu_backend=self.gpu_backend
+            gpu_backend=self.gpu_backend if stream.get("hw_accel_enabled") else None
         )
         
         logger.info(f"Starting FFmpeg for stream {stream_id}: {' '.join(cmd)}")
         
+        read_fd = None
         try:
-            # Start subprocess with pipe
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=0,  # Unbuffered
-                universal_newlines=False  # Binary for OpenCV
+            # Create a pipe using os.pipe() for file descriptor access
+            read_fd, write_fd = os.pipe()
+            
+            # Start subprocess with write end of pipe as stdout
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=write_fd,
+                stderr=subprocess.PIPE
             )
+            
+            # Close write end in parent process (subprocess has it)
+            os.close(write_fd)
             
             # Log stderr in background
             async def log_stderr():
-                loop = asyncio.get_event_loop()
                 if process.stderr is None:
                     return
-                while True:
-                    line = await loop.run_in_executor(None, process.stderr.readline)
-                    if not line:
-                        break
+                async for line in process.stderr:
                     from ..logging_config import log_ffmpeg_stderr
                     log_ffmpeg_stderr(stream_id, line)
             
             asyncio.create_task(log_stderr())
             
-            if process.stdout is None:
-                raise RuntimeError("FFmpeg stdout pipe not available")
+            # Create VideoCapture with read file descriptor in thread pool
+            loop = asyncio.get_event_loop()
             
-            # Test pipe with OpenCV
-            cap = cv2.VideoCapture()
-            if not cap.open(process.stdout.fileno(), cv2.CAP_FFMPEG):
+            def open_capture():
+                """Open VideoCapture with file descriptor in synchronous context."""
+                try:
+                    cap = cv2.VideoCapture()
+                    # Use the read file descriptor
+                    success = cap.open(read_fd, cv2.CAP_FFMPEG)
+                    if not success:
+                        logger.error(f"Failed to open VideoCapture for stream {stream_id}")
+                        return None
+                    return cap
+                except Exception as e:
+                    logger.error(f"Error opening VideoCapture: {e}")
+                    return None
+            
+            # Run the blocking OpenCV operation in thread pool
+            cap = await loop.run_in_executor(None, open_capture)
+            
+            if cap is None:
+                if read_fd is not None:
+                    os.close(read_fd)
                 process.terminate()
+                await process.wait()
                 raise RuntimeError("Failed to open FFmpeg pipe with OpenCV")
             
-            # Cap at 5 FPS by reading selectively if needed
-            cap.set(cv2.CAP_PROP_FPS, fps)
-            
-            # Store process and cap
+            # Store process, cap, and read_fd for cleanup
             self.active_processes[stream_id] = {
                 "process": process,
-                "cap": cap
+                "cap": cap,
+                "read_fd": read_fd
             }
             
             # Update status
@@ -389,7 +430,13 @@ class StreamsService:
             return True
             
         except Exception as e:
-            logger.error(f"Failed to start stream {stream_id}: {e}")
+            logger.error(f"Failed to start stream {stream_id}: {e}", exc_info=True)
+            # Clean up file descriptors if they exist
+            if read_fd is not None:
+                try:
+                    os.close(read_fd)
+                except OSError:
+                    pass
             return False
     
     async def stop_stream(self, stream_id: str) -> bool:
@@ -408,39 +455,61 @@ class StreamsService:
         proc_data = self.active_processes.pop(stream_id)
         process = proc_data["process"]
         cap = proc_data.get("cap")
+        read_fd = proc_data.get("read_fd")
         
+        # Release OpenCV capture
         if cap:
-            cap.release()
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, cap.release)
         
+        # Close file descriptor
+        if read_fd is not None:
+            try:
+                os.close(read_fd)
+            except OSError:
+                pass
+        
+        # Terminate process
         process.terminate()
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning(f"Stream {stream_id} did not terminate, killing...")
             process.kill()
+            await process.wait()
         
         # Update status
-        stream = await self.get_stream(stream_id)
-        if stream:
-            stream["status"] = "stopped"
-            await self.update_stream(stream_id, status="stopped")
+        streams = load_streams()
+        for s in streams:
+            if s["id"] == stream_id:
+                s["status"] = "stopped"
+                break
+        save_streams(streams)
         
         logger.info(f"Stopped stream {stream_id}")
         return True
     
-    async def get_frame(self, stream_id: str) -> Tuple[bool, Optional[Any]]:
+    async def get_frame(self, stream_id: str) -> Optional[Tuple[bool, Any]]:
         """Get next frame from stream pipe.
         
+        Args:
+            stream_id: Stream ID
+            
         Returns:
-            (success, frame)
+            Tuple of (success, frame) or None if stream not running
         """
         if stream_id not in self.active_processes:
-            return False, None
+            return None
         
         cap = self.active_processes[stream_id]["cap"]
-        ret, frame = cap.read()
-        return ret, frame  # frame is np.ndarray
+        
+        # Run blocking cv2.read() in thread pool
+        loop = asyncio.get_event_loop()
+        ret, frame = await loop.run_in_executor(None, cap.read)
+        
+        return (ret, frame)
     
-    def default_ffmpeg_params(self) -> list[str]:
+    def default_ffmpeg_params(self) -> List[str]:
         """Get default FFmpeg params with GPU flags if available.
         
         Returns:

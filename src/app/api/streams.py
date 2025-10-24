@@ -3,7 +3,6 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse, Response
 from typing import List
 import logging
-from threading import Lock
 import asyncio
 import json
 import random
@@ -22,14 +21,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/streams", tags=["streams"])
 
-# Global lock for concurrent starts
-_start_lock = Lock()
-
+# Global asyncio lock for concurrent starts (not threading.Lock)
+_start_lock = asyncio.Lock()
 
 def get_streams_service() -> StreamsService:
     """Dependency to get streams service instance."""
     return StreamsService()
-
 
 @router.get("", response_model=List[dict])
 async def list_streams(
@@ -55,7 +52,6 @@ async def list_streams(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list streams"
         )
-
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_stream(
@@ -114,7 +110,6 @@ async def create_stream(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create stream"
         )
-
 
 @router.put("/{stream_id}")
 async def update_stream(
@@ -183,7 +178,6 @@ async def update_stream(
             detail="Failed to update stream"
         )
 
-
 @router.delete("/{stream_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_stream(
     stream_id: str,
@@ -214,8 +208,7 @@ async def delete_stream(
             detail="Failed to delete stream"
         )
 
-
-@router.post("reorder")
+@router.post("/reorder")  # Fixed: added leading /
 async def reorder_streams(
     reorder_data: dict,
     service: StreamsService = Depends(get_streams_service)
@@ -252,7 +245,6 @@ async def reorder_streams(
             detail="Failed to reorder streams"
         )
 
-
 @router.get("/{stream_id}/mjpeg")
 async def mjpeg_stream(
     stream_id: str,
@@ -272,24 +264,34 @@ async def mjpeg_stream(
     fps = stream.get("target_fps", 5)
     
     async def generate_frames():
-        while True:
-            ret, frame = await service.get_frame(stream_id)
-            if not ret:
-                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + b''  # Empty frame or break
-                break
-            
-            # Resize to 640x480
-            height, width = frame.shape[:2]
-            if width != 640 or height != 480:
-                frame = cv2.resize(frame, (640, 480))
-            
-            # Encode JPEG 80% quality
-            ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            if not ret:
-                continue
-            
-            yield b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + str(len(jpeg)).encode() + b'\r\n\r\n' + jpeg.tobytes() + b'\r\n'
-            await asyncio.sleep(1 / fps)
+        try:
+            while True:
+                # Properly await the async method
+                frame_data = await service.get_frame(stream_id)
+                if frame_data is None:
+                    break
+                
+                ret, frame = frame_data
+                if not ret or frame is None:
+                    break
+                
+                # Run blocking cv2 operations in thread pool
+                jpeg_bytes = await asyncio.to_thread(encode_frame, frame)
+                if jpeg_bytes is None:
+                    continue
+                
+                yield (
+                    b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n'
+                    b'Content-Length: ' + str(len(jpeg_bytes)).encode() + b'\r\n\r\n' +
+                    jpeg_bytes + b'\r\n'
+                )
+                await asyncio.sleep(1 / fps)
+        except asyncio.CancelledError:
+            logger.info(f"MJPEG stream cancelled for {stream_id}")
+            raise
+        except Exception as e:
+            logger.error(f"Error in MJPEG stream {stream_id}: {e}", exc_info=True)
     
     return StreamingResponse(
         generate_frames(),
@@ -300,6 +302,24 @@ async def mjpeg_stream(
             "Expires": "0"
         }
     )
+
+def encode_frame(frame) -> bytes | None:
+    """Encode frame to JPEG in thread pool (blocking operation)."""
+    try:
+        # Resize to 640x480
+        height, width = frame.shape[:2]
+        if width != 640 or height != 480:
+            frame = cv2.resize(frame, (640, 480))
+        
+        # Encode JPEG 80% quality
+        ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if not ret:
+            return None
+        
+        return jpeg.tobytes()
+    except Exception as e:
+        logger.error(f"Error encoding frame: {e}")
+        return None
 
 @router.get("/{stream_id}/scores")
 async def scores_sse(
@@ -312,28 +332,45 @@ async def scores_sse(
         raise HTTPException(400, "Stream not running")
     
     async def event_generator():
-        while True:
-            ret, frame = await service.get_frame(stream_id)
-            if not ret:
-                break
-            
-            # Dummy scoring (replace with YOLO + Shapely)
-            distance = random.uniform(0, 1)
-            coords = {"x": random.uniform(0, 1), "y": random.uniform(0, 1)}
-            size = random.randint(50, 200)
-            
-            score = {"distance": distance, "coordinates": coords, "size": size, "timestamp": datetime.utcnow().isoformat()}
-            yield f"data: {json.dumps(score)}\n\n"
-            await asyncio.sleep(0.2)  # 5 FPS
+        try:
+            while True:
+                # Properly await the async method
+                frame_data = await service.get_frame(stream_id)
+                if frame_data is None:
+                    break
+                
+                ret, frame = frame_data
+                if not ret or frame is None:
+                    break
+                
+                # Dummy scoring (replace with YOLO + Shapely)
+                distance = random.uniform(0, 1)
+                coords = {"x": random.uniform(0, 1), "y": random.uniform(0, 1)}
+                size = random.randint(50, 200)
+                
+                score = {
+                    "distance": distance,
+                    "coordinates": coords,
+                    "size": size,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                yield f"data: {json.dumps(score)}\n\n"
+                await asyncio.sleep(0.2)  # 5 FPS
+        except asyncio.CancelledError:
+            logger.info(f"SSE stream cancelled for {stream_id}")
+            raise
+        except Exception as e:
+            logger.error(f"Error in SSE stream {stream_id}: {e}", exc_info=True)
     
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
     )
-
-
-
 
 @router.get("/gpu-backend")
 async def get_gpu_backend():
@@ -341,7 +378,6 @@ async def get_gpu_backend():
     from ..config_io import get_gpu_backend
     backend = get_gpu_backend()
     return {"gpu_backend": backend}
-
 
 @router.post("/{stream_id}/start", status_code=status.HTTP_200_OK)
 async def start_stream(
@@ -361,7 +397,8 @@ async def start_stream(
         if stream["status"] == "running":
             return {"message": "Stream already running"}
         
-        with _start_lock:
+        # Use asyncio.Lock instead of threading.Lock
+        async with _start_lock:
             if len(service.active_processes) >= 4:
                 raise HTTPException(
                     status_code=409,
@@ -381,7 +418,6 @@ async def start_stream(
     except Exception as e:
         logger.error(f"Error starting stream {stream_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
 
 @router.post("/{stream_id}/stop", status_code=status.HTTP_200_OK)
 async def stop_stream(
@@ -410,7 +446,6 @@ async def stop_stream(
     except Exception as e:
         logger.error(f"Error stopping stream {stream_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
 
 @router.get("/metrics")
 async def metrics():

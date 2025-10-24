@@ -32,13 +32,16 @@ import type { StreamResponse } from '@/lib/types'
 interface StreamFormData {
   name: string
   rtsp_url: string
+  hw_accel_enabled: boolean
+  ffmpeg_params: string | string[]
+  target_fps: number
 }
 
 export default function EditStream() {
   const { streamId } = useParams<{ streamId: string }>()
   const navigate = useNavigate()
   const { streams, updateStream, deleteStream, isLoading: streamsLoading } = useStreams()
-  
+
   const [stream, setStream] = useState<StreamResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -63,12 +66,20 @@ export default function EditStream() {
     try {
       setIsLoading(true)
       setError(null)
-      // Transform ffmpeg_params back to array if string
+
+      // Transform ffmpeg_params to array if it's a string
       const submitData = {
-        ...data,
-        ffmpeg_params: typeof data.ffmpeg_params === 'string' ? data.ffmpeg_params.split(' ').filter(Boolean) : data.ffmpeg_params
+        name: data.name,
+        rtsp_url: data.rtsp_url,
+        hw_accel_enabled: data.hw_accel_enabled,
+        target_fps: data.target_fps,
+        ffmpeg_params: typeof data.ffmpeg_params === 'string' 
+          ? data.ffmpeg_params.split(' ').filter(Boolean) 
+          : data.ffmpeg_params
       }
+
       await updateStream(streamId, submitData)
+      
       // Navigate back to dashboard after successful update
       navigate('/')
     } catch (err) {
@@ -87,6 +98,7 @@ export default function EditStream() {
       setIsDeleting(true)
       setError(null)
       await deleteStream(streamId)
+      
       // Navigate back to dashboard after successful deletion
       navigate('/')
     } catch (err) {
@@ -102,11 +114,7 @@ export default function EditStream() {
   if (streamsLoading && !stream) {
     return (
       <Layout>
-        <div className="container mx-auto p-6">
-          <div className="flex items-center justify-center py-12">
-            <p className="text-muted-foreground">Loading stream...</p>
-          </div>
-        </div>
+        <div className="text-center py-12">Loading stream...</div>
       </Layout>
     )
   }
@@ -115,13 +123,11 @@ export default function EditStream() {
   if (error && !stream) {
     return (
       <Layout>
-        <div className="container mx-auto p-6">
-          <Alert variant="destructive" className="mb-6">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-          <Button onClick={() => navigate('/')}>Back to Dashboard</Button>
-        </div>
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+        <Button onClick={() => navigate('/')}>Back to Dashboard</Button>
       </Layout>
     )
   }
@@ -129,12 +135,10 @@ export default function EditStream() {
   // Stream found - show edit form
   return (
     <Layout>
-      <div className="container mx-auto p-6">
+      <div className="max-w-2xl mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Edit Stream</h1>
-          <p className="text-muted-foreground">
-            Update the stream configuration below
-          </p>
+          <p className="text-muted-foreground">Update the stream configuration below</p>
         </div>
 
         {error && (
@@ -145,19 +149,18 @@ export default function EditStream() {
         )}
 
         {stream && (
-          <div className="space-y-6">
+          <>
             <StreamForm
               initialValues={stream}
               onSubmit={handleSubmit}
               isLoading={isLoading}
-              error={error}
-              submitLabel="Save Changes"
+              submitLabel="Update Stream"
               isEdit={true}
             />
 
             {/* Delete Stream Section */}
-            <div className="border-t pt-6">
-              <h3 className="text-lg font-semibold mb-4 text-destructive">Danger Zone</h3>
+            <div className="mt-12 pt-8 border-t border-destructive/20">
+              <h2 className="text-xl font-semibold text-destructive mb-2">Danger Zone</h2>
               <p className="text-sm text-muted-foreground mb-4">
                 Delete this stream permanently. This action cannot be undone.
               </p>
@@ -171,7 +174,7 @@ export default function EditStream() {
                 Delete Stream
               </Button>
             </div>
-          </div>
+          </>
         )}
 
         {/* Delete Confirmation Dialog */}
@@ -184,10 +187,9 @@ export default function EditStream() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDelete}
-                disabled={isDeleting}
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
                 {isDeleting ? 'Deleting...' : 'Delete'}
