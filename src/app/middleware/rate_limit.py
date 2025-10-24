@@ -95,6 +95,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         Returns:
             Response from handler or rate limit error
         """
+        path = request.url.path
+        # Exempt /mjpeg and /health endpoints from rate limiting
+        if path.startswith("/streams/") and "/mjpeg" in path or path in ["/health", "/metrics"]:
+            return await call_next(request)
+        
         # Only rate limit mutating methods
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             client_ip = self._get_client_ip(request)

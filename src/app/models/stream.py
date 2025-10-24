@@ -11,9 +11,12 @@ class Stream(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = Field(..., min_length=1, max_length=50)
     rtsp_url: str = Field(..., min_length=1)
+    hw_accel_enabled: bool = Field(default=True)
+    ffmpeg_params: list[str] = Field(default_factory=lambda: ["-hide_banner", "-loglevel", "warning", "-threads", "2", "-rtsp_transport", "tcp", "-timeout", "10000000"])
+    target_fps: int = Field(default=5, ge=1, le=30)
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
     order: int = Field(default=0, ge=0)
-    status: Literal["Active", "Inactive"] = Field(default="Active")
+    status: Literal["Active", "Inactive", "running", "stopped", "error"] = Field(default="stopped")
     
     @field_validator("name")
     @classmethod
@@ -35,6 +38,19 @@ class Stream(BaseModel):
         if len(v) < 10:  # rtsp://x/y minimum
             raise ValueError("RTSP URL must include host")
         return v
+    
+    @field_validator("ffmpeg_params")
+    @classmethod
+    def validate_ffmpeg_params(cls, v: list[str]) -> list[str]:
+        """Validate FFmpeg params: no shell metachars, whitelist common flags."""
+        forbidden = [";", "&", "|", ">", "<", "`", "$"]
+        for param in v:
+            if any(f in param for f in forbidden):
+                raise ValueError(f"Invalid FFmpeg param: {param} contains shell metachars")
+            # Whitelist: allow -flag value patterns
+            if not (param.startswith("-") or param.isdigit() or param.replace(".", "").replace(":", "").isalnum()):
+                raise ValueError(f"Suspicious FFmpeg param: {param}")
+        return v
 
 
 class NewStream(BaseModel):
@@ -42,6 +58,9 @@ class NewStream(BaseModel):
     
     name: str = Field(..., min_length=1, max_length=50)
     rtsp_url: str = Field(..., min_length=1)
+    hw_accel_enabled: bool = Field(default=True)
+    ffmpeg_params: list[str] | None = Field(None, description="Optional FFmpeg params; defaults applied if None")
+    target_fps: int = Field(default=5, ge=1, le=30)
     
     @field_validator("name")
     @classmethod
@@ -62,6 +81,14 @@ class NewStream(BaseModel):
         if len(v) < 10:
             raise ValueError("RTSP URL must include host")
         return v
+    
+    @field_validator("ffmpeg_params")
+    @classmethod
+    def validate_ffmpeg_params(cls, v: list[str] | None) -> list[str] | None:
+        """Validate FFmpeg params if provided."""
+        if v is None:
+            return None
+        return Stream.validate_ffmpeg_params(v)
 
 
 class EditStream(BaseModel):
@@ -69,6 +96,10 @@ class EditStream(BaseModel):
     
     name: str | None = Field(None, min_length=1, max_length=50)
     rtsp_url: str | None = Field(None, min_length=1)
+    hw_accel_enabled: bool | None = Field(None)
+    ffmpeg_params: list[str] | None = Field(None)
+    target_fps: int | None = Field(None, ge=1, le=30)
+    status: Literal["Active", "Inactive", "running", "stopped", "error"] | None = None
     
     @field_validator("name")
     @classmethod
@@ -91,3 +122,11 @@ class EditStream(BaseModel):
             if len(v) < 10:
                 raise ValueError("RTSP URL must include host")
         return v
+    
+    @field_validator("ffmpeg_params")
+    @classmethod
+    def validate_ffmpeg_params(cls, v: list[str] | None) -> list[str] | None:
+        """Validate FFmpeg params if provided."""
+        if v is None:
+            return None
+        return Stream.validate_ffmpeg_params(v)

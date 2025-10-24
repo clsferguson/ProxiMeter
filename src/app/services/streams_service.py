@@ -1,14 +1,18 @@
 """Stream management service with business logic."""
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Tuple
 import logging
 from datetime import datetime
 import uuid
+import subprocess
+import os
+import cv2
+import numpy as np  # For frame typing if needed
 
 from ..config_io import load_streams, save_streams
 from ..models.stream import Stream, NewStream
 from ..utils.validation import validate_rtsp_url
 from ..utils.strings import normalize_stream_name
-from ..utils.rtsp import probe_rtsp_stream
+from ..utils.rtsp import probe_rtsp_stream, build_ffmpeg_command, validate_rtsp_url, build_ffmpeg_command, validate_rtsp_url
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +27,8 @@ class StreamsService:
             config_path: Path to the YAML configuration file
         """
         self.config_path = config_path
+        self.active_processes: Dict[str, Dict[str, Any]] = {}
+        self.gpu_backend = os.environ.get("GPU_BACKEND_DETECTED", "none")
         logger.info(f"StreamsService initialized with config: {config_path}")
     
     async def list_streams(self) -> List[dict]:
@@ -107,13 +113,20 @@ class StreamsService:
         return None
     
     async def update_stream(self, stream_id: str, name: Optional[str] = None, 
-                          rtsp_url: Optional[str] = None) -> Optional[dict]:
+                          rtsp_url: Optional[str] = None, status: Optional[str] = None,
+                          hw_accel_enabled: Optional[bool] = None, 
+                          ffmpeg_params: Optional[List[str]] = None, 
+                          target_fps: Optional[int] = None) -> Optional[dict]:
         """Update a stream (partial update).
         
         Args:
             stream_id: Stream UUID
             name: New name (optional)
             rtsp_url: New RTSP URL (optional)
+            status: New status (optional)
+            hw_accel_enabled: New hardware acceleration flag (optional)
+            ffmpeg_params: New FFmpeg parameters (optional)
+            target_fps: New target FPS (optional)
             
         Returns:
             Updated stream dictionary or None if not found
@@ -163,12 +176,25 @@ class StreamsService:
             stream["rtsp_url"] = rtsp_url
             url_changed = True
         
+        if hw_accel_enabled is not None:
+            stream["hw_accel_enabled"] = hw_accel_enabled
+
+        if ffmpeg_params is not None:
+            stream["ffmpeg_params"] = ffmpeg_params
+
+        if target_fps is not None:
+            stream["target_fps"] = target_fps
+
         # Re-probe if URL changed
         if url_changed:
             logger.info(f"Re-probing RTSP stream {stream_id} after URL change")
             is_reachable = await probe_rtsp_stream(stream["rtsp_url"], timeout_seconds=2.0)
             stream["status"] = "Active" if is_reachable else "Inactive"
             logger.info(f"Stream {stream_id} status updated to {stream['status']}")
+        
+        # Update status if provided
+        if status is not None:
+            stream["status"] = status
         
         # Save updated streams
         streams[stream_index] = stream
@@ -265,3 +291,135 @@ class StreamsService:
         
         logger.info(f"Reordered {len(reordered_streams)} streams")
         return True
+    
+    async def start_stream(self, stream_id: str, stream: dict) -> bool:
+        """Start FFmpeg processing for a stream.
+        
+        Args:
+            stream_id: Stream ID
+            stream: Stream dict with config
+            
+        Returns:
+            True if started successfully
+        """
+        if stream_id in self.active_processes:
+            logger.warning(f"Stream {stream_id} already running")
+            return False
+        
+        if stream.get("hw_accel_enabled", True) and self.gpu_backend == "none":
+            logger.error(f"Hardware acceleration requested but no GPU detected for stream {stream_id}")
+            raise ValueError("GPU unavailable for hardware acceleration")
+        
+        # Validate URL and params
+        url = stream["rtsp_url"]
+        params = stream.get("ffmpeg_params", [])
+        fps = stream.get("target_fps", 5)
+        
+        is_valid = validate_rtsp_url(url, params, self.gpu_backend)
+        if not is_valid:
+            raise ValueError("Invalid RTSP URL or FFmpeg params")
+        
+        # Build command
+        cmd = build_ffmpeg_command(
+            rtsp_url=url,
+            ffmpeg_params=params,
+            target_fps=fps,
+            gpu_backend=self.gpu_backend
+        )
+        
+        logger.info(f"Starting FFmpeg for stream {stream_id}: {' '.join(cmd)}")
+        
+        try:
+            # Start subprocess with pipe
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,  # Unbuffered
+                universal_newlines=False  # Binary for OpenCV
+            )
+            
+            if process.stdout is None:
+                raise RuntimeError("FFmpeg stdout pipe not available")
+            
+            # Test pipe with OpenCV
+            cap = cv2.VideoCapture()
+            if not cap.open(process.stdout.fileno(), cv2.CAP_FFMPEG):
+                process.terminate()
+                raise RuntimeError("Failed to open FFmpeg pipe with OpenCV")
+            
+            # Cap at 5 FPS by reading selectively if needed
+            cap.set(cv2.CAP_PROP_FPS, fps)
+            
+            # Store process and cap
+            self.active_processes[stream_id] = {
+                "process": process,
+                "cap": cap
+            }
+            
+            # Update status
+            stream["status"] = "running"
+            streams = load_streams()
+            for s in streams:
+                if s["id"] == stream_id:
+                    s["status"] = "running"
+                    break
+            save_streams(streams)
+            
+            logger.info(f"Started stream {stream_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to start stream {stream_id}: {e}")
+            return False
+    
+    async def stop_stream(self, stream_id: str) -> bool:
+        """Stop FFmpeg processing for a stream.
+        
+        Args:
+            stream_id: Stream ID
+            
+        Returns:
+            True if stopped successfully
+        """
+        if stream_id not in self.active_processes:
+            logger.warning(f"Stream {stream_id} not running")
+            return False
+        
+        proc_data = self.active_processes.pop(stream_id)
+        process = proc_data["process"]
+        cap = proc_data.get("cap")
+        
+        if cap:
+            cap.release()
+        
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        
+        # Update status
+        stream = await self.get_stream(stream_id)
+        if stream:
+            stream["status"] = "stopped"
+            await self.update_stream(stream_id, status="stopped")
+        
+        logger.info(f"Stopped stream {stream_id}")
+        return True
+    
+    async def get_frame(self, stream_id: str) -> tuple[bool, cv2.Mat | None]:
+        """Get next frame from stream pipe.
+        
+        Returns:
+            (success, frame)
+        """
+        if stream_id not in self.active_processes:
+            return False, None
+        
+        cap = self.active_processes[stream_id]["cap"]
+        ret, frame = cap.read()
+        return ret, frame  # frame is np.ndarray
+    
+    # Update create_stream and update_stream to call start/stop if needed, but defer to API layer
+    # For now, assume API calls start after create/update validation

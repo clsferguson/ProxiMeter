@@ -149,3 +149,28 @@ async def probe_rtsp_stream(rtsp_url: str, timeout_seconds: float = 2.0) -> bool
     except Exception as e:
         logger.debug(f"RTSP probe error for {rtsp_url}: {e}")
         return False
+
+
+def probe_rtsp_stream(rtsp_url: str, timeout_seconds: float = 2.0) -> bool:
+    """Probe RTSP stream reachability using ffprobe.
+    
+    Args:
+        rtsp_url: RTSP URL to probe
+        timeout_seconds: Probe timeout
+        
+    Returns:
+        True if stream is reachable
+    """
+    from subprocess import run, PIPE, timeout
+    cmd = [
+        "ffprobe",
+        "-hide_banner",
+        "-loglevel", "error",
+        "-timeout", str(int(timeout_seconds * 1e6)),  # microseconds
+        "-i", rtsp_url
+    ]
+    try:
+        result = run(cmd, stdout=PIPE, stderr=PIPE, timeout=timeout_seconds)
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        return False

@@ -36,10 +36,10 @@ Initialize or update project structure, dependencies, and config for FFmpeg inte
 ### Phase 2: Foundational (Blocking Prerequisites)
 Implement core models, services, and middleware shared across stories. No user stories.
 
-- [ ] T005 Update Stream Pydantic model to add hw_accel_enabled, ffmpeg_params (list[str]), target_fps (int, default 5) fields with validation in src/app/models/stream.py
-- [ ] T006 [P] Implement FFmpeg subprocess management in streams_service.py (start/stop, pipe to OpenCV, 5 FPS cap; fail-fast if GPU unavailable per detected backend) in src/app/services/streams_service.py
-- [ ] T007 Add rate-limiting middleware exemption for /mjpeg and /health endpoints in src/app/middleware/rate_limit.py
-- [ ] T008 Update config_io.py to load GPU_BACKEND_DETECTED from env and expose to app in src/app/config_io.py
+- [X] T005 Update Stream Pydantic model to add hw_accel_enabled, ffmpeg_params (list[str]), target_fps (int, default 5) fields with validation in src/app/models/stream.py
+- [X] T006 [P] Implement FFmpeg subprocess management in streams_service.py (start/stop, pipe to OpenCV, 5 FPS cap; fail-fast if GPU unavailable per detected backend) in src/app/services/streams_service.py
+- [X] T007 Add rate-limiting middleware exemption for /mjpeg and /health endpoints in src/app/middleware/rate_limit.py
+- [X] T008 Update config_io.py to load GPU_BACKEND_DETECTED from env and expose to app in src/app/config_io.py
 
 ### Phase 3: User Story 1 - Configure and View Accelerated Stream [US1]
 As an administrator, configure RTSP stream with hardware accel and view processed MJPEG feed. Independently testable: Add stream via UI, verify MJPEG displays at 5 FPS with low latency.

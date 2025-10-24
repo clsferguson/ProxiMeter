@@ -105,3 +105,8 @@ def save_streams(streams: list[dict[str, Any]]) -> None:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
             raise
+
+
+def get_gpu_backend() -> str:
+    """Get detected GPU backend from environment."""
+    return os.environ.get("GPU_BACKEND_DETECTED", "none")
