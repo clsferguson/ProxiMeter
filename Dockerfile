@@ -1,9 +1,12 @@
 # syntax=docker/dockerfile:1.7-labs
 
-FROM node:20.18.0-bookworm-slim AS frontend-deps
+# Use Node.js 22 LTS (latest is 22.21.0 as of Oct 2025)
+FROM node:22.21.0-bookworm-slim AS frontend-deps
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci
+# Update npm to latest and install dependencies
+RUN npm install -g npm@latest && \
+    npm ci --legacy-peer-deps
 
 FROM frontend-deps AS frontend-build
 COPY frontend/ ./
@@ -32,7 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.txt
+    pip install --upgrade pip && \
+    pip install --root-user-action=ignore -r requirements.txt
 
 RUN useradd -m -u 10001 appuser
 
