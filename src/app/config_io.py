@@ -13,6 +13,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+
 # ============================================================================
 # Constants
 # ============================================================================
@@ -25,8 +26,8 @@ STREAMS_KEY: Final[str] = "streams"
 _DRY_RUN_MODE: Final[bool] = os.getenv("CI_DRY_RUN", "").lower() in ("true", "1", "yes")
 
 # Thread-safe in-memory storage for testing
-_in_memory_streams: list[dict[str, Any]] = []
-_config_lock = threading.RLock()  # Reentrant lock for nested calls
+_in_memory_config: dict[str, Any] = {STREAMS_KEY: []}
+_config_lock = threading.RLock()
 
 
 # ============================================================================
@@ -34,49 +35,36 @@ _config_lock = threading.RLock()  # Reentrant lock for nested calls
 # ============================================================================
 
 def _ensure_config_dir() -> None:
-    """Ensure configuration directory exists.
-    
-    Creates the config directory if it doesn't exist.
-    Safe to call multiple times (idempotent).
-    """
+    """Ensure configuration directory exists."""
     if not _DRY_RUN_MODE:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _initialize_config_file() -> None:
-    """Initialize configuration file with empty structure.
-    
-    Creates a new config file with empty streams list.
-    Only called when config file doesn't exist.
-    """
+    """Initialize configuration file with empty structure."""
     if not _DRY_RUN_MODE:
         logger.info(f"Initializing new configuration file: {CONFIG_PATH}")
-        save_streams([])
+        save_streams({STREAMS_KEY: []})
 
 
 # ============================================================================
 # Configuration Loading
 # ============================================================================
 
-def load_streams() -> list[dict[str, Any]]:
-    """Load streams from configuration storage.
-    
-    In production: Loads from YAML file with automatic error recovery.
-    In dry-run mode: Returns in-memory copy for testing.
+def load_streams() -> dict[str, Any]:
+    """Load configuration from storage.
     
     Returns:
-        List of stream dictionaries, sorted by order field.
-        Returns empty list if file is missing or malformed.
+        Configuration dict with 'streams' key containing list of streams.
         
     Example:
-        >>> streams = load_streams()
-        >>> for stream in streams:
-        ...     print(stream['name'], stream['rtsp_url'])
+        >>> config = load_streams()
+        >>> streams = config.get("streams", [])
     """
     # Dry-run mode: return in-memory copy
     if _DRY_RUN_MODE:
         with _config_lock:
-            return _in_memory_streams.copy()
+            return _in_memory_config.copy()
     
     # Ensure config directory exists
     _ensure_config_dir()
@@ -84,7 +72,7 @@ def load_streams() -> list[dict[str, Any]]:
     # Initialize if config doesn't exist
     if not CONFIG_PATH.exists():
         _initialize_config_file()
-        return []
+        return {STREAMS_KEY: []}
     
     # Load configuration with error recovery
     with _config_lock:
@@ -92,62 +80,71 @@ def load_streams() -> list[dict[str, Any]]:
             with io.open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             
-            streams = data.get(STREAMS_KEY, [])
+            # Ensure data is a dict
+            if not isinstance(data, dict):
+                logger.warning(
+                    f"Invalid config format in {CONFIG_PATH}, reinitializing"
+                )
+                _initialize_config_file()
+                return {STREAMS_KEY: []}
             
-            # Validate streams is a list
-            if not isinstance(streams, list):
+            # Ensure streams key exists and is a list
+            if STREAMS_KEY not in data:
+                data[STREAMS_KEY] = []
+            elif not isinstance(data[STREAMS_KEY], list):
                 logger.warning(
                     f"Invalid streams format in {CONFIG_PATH}, reinitializing"
                 )
-                _initialize_config_file()
-                return []
+                data[STREAMS_KEY] = []
             
-            return streams
+            return data
             
         except yaml.YAMLError as e:
             logger.error(f"YAML parsing error in {CONFIG_PATH}: {e}")
             _initialize_config_file()
-            return []
+            return {STREAMS_KEY: []}
             
         except Exception as e:
             logger.error(f"Error loading config from {CONFIG_PATH}: {e}")
             _initialize_config_file()
-            return []
+            return {STREAMS_KEY: []}
 
 
 # ============================================================================
 # Configuration Saving
 # ============================================================================
 
-def save_streams(streams: list[dict[str, Any]]) -> None:
-    """Persist streams to configuration storage with atomic writes.
-    
-    In production: Uses atomic write pattern (write to temp, then rename).
-    In dry-run mode: Updates in-memory storage for testing.
-    
-    Automatically normalizes order field to be contiguous (0, 1, 2, ...).
+def save_streams(config: dict[str, Any]) -> None:
+    """Persist configuration to storage with atomic writes.
     
     Args:
-        streams: List of stream dictionaries to persist
-        
-    Raises:
-        OSError: If file operations fail
-        yaml.YAMLError: If YAML serialization fails
+        config: Configuration dict with 'streams' key
         
     Example:
-        >>> streams = load_streams()
-        >>> streams.append({"name": "Camera 1", "rtsp_url": "rtsp://..."})
-        >>> save_streams(streams)
+        >>> config = load_streams()
+        >>> config["streams"].append({"name": "Camera 1", ...})
+        >>> save_streams(config)
     """
+    # Validate input
+    if not isinstance(config, dict):
+        raise ValueError("Config must be a dictionary")
+    
+    if STREAMS_KEY not in config:
+        config[STREAMS_KEY] = []
+    
+    if not isinstance(config[STREAMS_KEY], list):
+        raise ValueError("Streams must be a list")
+    
     # Normalize order field to be contiguous
-    normalized_streams = _normalize_stream_order(streams)
+    normalized_config = config.copy()
+    normalized_config[STREAMS_KEY] = _normalize_stream_order(config[STREAMS_KEY])
     
     # Dry-run mode: update in-memory storage
     if _DRY_RUN_MODE:
         with _config_lock:
-            global _in_memory_streams
-            _in_memory_streams = normalized_streams.copy()
-        logger.debug("Saved streams to in-memory storage (dry-run mode)")
+            global _in_memory_config
+            _in_memory_config = normalized_config.copy()
+        logger.debug("Saved config to in-memory storage (dry-run mode)")
         return
     
     # Ensure config directory exists
@@ -167,7 +164,7 @@ def save_streams(streams: list[dict[str, Any]]) -> None:
             # Write to temp file
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 yaml.safe_dump(
-                    {STREAMS_KEY: normalized_streams},
+                    normalized_config,
                     f,
                     default_flow_style=False,
                     sort_keys=True,
@@ -177,7 +174,8 @@ def save_streams(streams: list[dict[str, Any]]) -> None:
             # Atomic rename (POSIX) or best-effort (Windows)
             _atomic_rename(temp_path, CONFIG_PATH)
             
-            logger.debug(f"Saved {len(normalized_streams)} streams to {CONFIG_PATH}")
+            streams_count = len(normalized_config.get(STREAMS_KEY, []))
+            logger.debug(f"Saved config with {streams_count} streams to {CONFIG_PATH}")
             
         except Exception as e:
             logger.error(f"Error saving config to {CONFIG_PATH}: {e}")
@@ -191,14 +189,7 @@ def save_streams(streams: list[dict[str, Any]]) -> None:
 
 
 def _normalize_stream_order(streams: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Normalize stream order field to be contiguous.
-    
-    Args:
-        streams: List of stream dictionaries
-        
-    Returns:
-        List with normalized order field (0, 1, 2, ...)
-    """
+    """Normalize stream order field to be contiguous."""
     normalized = []
     for idx, stream in enumerate(streams):
         stream_copy = stream.copy()
@@ -208,12 +199,7 @@ def _normalize_stream_order(streams: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 def _atomic_rename(src: str | Path, dst: str | Path) -> None:
-    """Atomically rename file (or best-effort on Windows).
-    
-    Args:
-        src: Source file path
-        dst: Destination file path
-    """
+    """Atomically rename file (or best-effort on Windows)."""
     src_path = Path(src)
     dst_path = Path(dst)
     
@@ -230,19 +216,9 @@ def _atomic_rename(src: str | Path, dst: str | Path) -> None:
 # ============================================================================
 
 def get_gpu_backend() -> str:
-    """Get detected GPU backend from environment.
-    
-    Returns:
-        GPU backend type: "nvidia", "amd", "intel", or "none"
-        
-    Example:
-        >>> backend = get_gpu_backend()
-        >>> if backend != "none":
-        ...     print(f"GPU acceleration available: {backend}")
-    """
+    """Get detected GPU backend from environment."""
     backend = os.getenv("GPU_BACKEND_DETECTED", "none").lower()
     
-    # Validate backend value
     valid_backends = {"nvidia", "amd", "intel", "none"}
     if backend not in valid_backends:
         logger.warning(
@@ -258,15 +234,11 @@ def get_gpu_backend() -> str:
 # ============================================================================
 
 def reset_config() -> None:
-    """Reset configuration to empty state.
-    
-    Useful for testing or emergency recovery.
-    Creates a backup of existing config if present.
-    """
+    """Reset configuration to empty state."""
     with _config_lock:
         if _DRY_RUN_MODE:
-            global _in_memory_streams
-            _in_memory_streams = []
+            global _in_memory_config
+            _in_memory_config = {STREAMS_KEY: []}
             logger.info("Reset in-memory configuration")
             return
         
@@ -282,26 +254,23 @@ def reset_config() -> None:
 
 
 def get_config_info() -> dict[str, Any]:
-    """Get configuration metadata.
-    
-    Returns:
-        Dictionary with config location, mode, and stats
-    """
+    """Get configuration metadata."""
     with _config_lock:
         if _DRY_RUN_MODE:
             return {
                 "mode": "dry-run",
                 "storage": "in-memory",
-                "streams_count": len(_in_memory_streams)
+                "streams_count": len(_in_memory_config.get(STREAMS_KEY, []))
             }
         
+        config = load_streams() if CONFIG_PATH.exists() else {STREAMS_KEY: []}
         return {
             "mode": "production",
             "storage": "file",
             "config_path": str(CONFIG_PATH),
             "config_dir": str(CONFIG_DIR),
             "exists": CONFIG_PATH.exists(),
-            "streams_count": len(load_streams()) if CONFIG_PATH.exists() else 0
+            "streams_count": len(config.get(STREAMS_KEY, []))
         }
 
 
@@ -309,10 +278,9 @@ def get_config_info() -> dict[str, Any]:
 # Initialization
 # ============================================================================
 
-# Initialize on module import (safe, idempotent)
+# Initialize on module import
 _ensure_config_dir()
 
-# Log configuration info
 if _DRY_RUN_MODE:
     logger.info("Configuration: DRY_RUN mode (in-memory storage)")
 else:

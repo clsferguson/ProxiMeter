@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Plus, Play, Square, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
 
 interface Stream {
   id: string;
@@ -18,54 +18,92 @@ interface Stream {
 export default function Dashboard() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  
+  // Use ref to track active streams for cleanup without adding to deps
+  const activeStreamIds = useRef<string[]>([]);
 
   const fetchStreams = async () => {
     try {
       const response = await fetch('/api/streams');
       const data = await response.json();
       setStreams(data);
+      
+      // Update ref with running stream IDs
+      activeStreamIds.current = data
+        .filter((s: Stream) => s.status === 'running')
+        .map((s: Stream) => s.id);
+      
+      return data;
     } catch (error) {
       console.error('Error fetching streams:', error);
-    } finally {
-      setLoading(false);
+      return [];
     }
   };
 
-  useEffect(() => {
-    fetchStreams();
-    const interval = setInterval(fetchStreams, 2000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleStartStop = async (streamId: string, currentStatus: string) => {
-    setActionLoading(streamId);
+  const startStream = async (streamId: string) => {
     try {
-      const endpoint = currentStatus === 'running' ? 'stop' : 'start';
-      const response = await fetch(`/api/streams/${streamId}/${endpoint}`, {
-        method: 'POST',
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to ${endpoint} stream`);
-      }
-      
-      await fetchStreams();
+      await fetch(`/api/streams/${streamId}/start`, { method: 'POST' });
     } catch (error) {
-      console.error('Error toggling stream:', error);
-      alert(`Failed to ${currentStatus === 'running' ? 'stop' : 'start'} stream`);
-    } finally {
-      setActionLoading(null);
+      console.error(`Error starting stream ${streamId}:`, error);
     }
   };
+
+  const stopStream = async (streamId: string) => {
+    try {
+      await fetch(`/api/streams/${streamId}/stop`, { method: 'POST' });
+    } catch (error) {
+      console.error(`Error stopping stream ${streamId}:`, error);
+    }
+  };
+
+  // Auto-start all stopped streams on mount
+  useEffect(() => {
+    const initializeStreams = async () => {
+      setLoading(true);
+      const fetchedStreams = await fetchStreams();
+      
+      // Start all stopped streams
+      const startPromises = fetchedStreams
+        .filter((stream: Stream) => stream.status === 'stopped')
+        .map((stream: Stream) => startStream(stream.id));
+      
+      await Promise.all(startPromises);
+      
+      // Refresh to get updated statuses
+      await fetchStreams();
+      setLoading(false);
+    };
+
+    initializeStreams();
+
+    // Auto-refresh every 2 seconds
+    const interval = setInterval(fetchStreams, 2000);
+
+    // Cleanup: stop all streams when component unmounts
+    return () => {
+      clearInterval(interval);
+      
+      // Stop all active streams tracked in ref
+      activeStreamIds.current.forEach(streamId => {
+        stopStream(streamId);
+      });
+    };
+  }, []); // Empty deps is correct - only run on mount/unmount
 
   const handleDelete = async (streamId: string, streamName: string) => {
     if (!confirm(`Are you sure you want to delete "${streamName}"?`)) {
       return;
     }
 
-    setActionLoading(streamId);
+    setDeletingId(streamId);
     try {
+      // Stop stream first if running
+      const stream = streams.find(s => s.id === streamId);
+      if (stream?.status === 'running') {
+        await stopStream(streamId);
+      }
+
       const response = await fetch(`/api/streams/${streamId}`, {
         method: 'DELETE',
       });
@@ -79,7 +117,7 @@ export default function Dashboard() {
       console.error('Error deleting stream:', error);
       alert('Failed to delete stream');
     } finally {
-      setActionLoading(null);
+      setDeletingId(null);
     }
   };
 
@@ -99,7 +137,10 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-lg">Loading streams...</div>
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+          <div className="text-lg">Initializing streams...</div>
+        </div>
       </div>
     );
   }
@@ -141,13 +182,18 @@ export default function Dashboard() {
                       alt={stream.name}
                       className="w-full h-full object-cover"
                     />
+                  ) : stream.status === 'stopped' ? (
+                    <div className="w-full h-full flex items-center justify-center text-gray-400">
+                      <div className="text-center">
+                        <Loader2 className="w-12 h-12 animate-spin mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">Starting stream...</p>
+                      </div>
+                    </div>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-gray-400">
                       <div className="text-center">
-                        <Square className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">
-                          {stream.status === 'error' ? 'Stream Error' : 'Stream Stopped'}
-                        </p>
+                        <p className="text-sm">Stream Error</p>
+                        <p className="text-xs mt-1 opacity-70">Check RTSP URL</p>
                       </div>
                     </div>
                   )}
@@ -177,31 +223,10 @@ export default function Dashboard() {
 
                   {/* Action Buttons */}
                   <div className="flex gap-2">
-                    <Button
-                      onClick={() => handleStartStop(stream.id, stream.status)}
-                      disabled={actionLoading === stream.id}
-                      variant={stream.status === 'running' ? 'destructive' : 'default'}
-                      className="flex-1"
-                      size="sm"
-                    >
-                      {actionLoading === stream.id ? (
-                        'Loading...'
-                      ) : stream.status === 'running' ? (
-                        <>
-                          <Square className="w-4 h-4 mr-1" />
-                          Stop
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-4 h-4 mr-1" />
-                          Start
-                        </>
-                      )}
-                    </Button>
-                    
-                    <Link to={`/streams/${stream.id}/edit`}>
-                      <Button variant="outline" size="sm">
-                        <Pencil className="w-4 h-4" />
+                    <Link to={`/streams/${stream.id}/edit`} className="flex-1">
+                      <Button variant="outline" size="sm" className="w-full">
+                        <Pencil className="w-4 h-4 mr-1" />
+                        Edit
                       </Button>
                     </Link>
                     
@@ -209,9 +234,13 @@ export default function Dashboard() {
                       variant="outline"
                       size="sm"
                       onClick={() => handleDelete(stream.id, stream.name)}
-                      disabled={actionLoading === stream.id}
+                      disabled={deletingId === stream.id}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      {deletingId === stream.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
                     </Button>
                   </div>
                 </div>

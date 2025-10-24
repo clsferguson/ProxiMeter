@@ -147,27 +147,27 @@ async def generate_mjpeg_stream(
 
 
 async def _mark_stream_inactive(stream_id: str | None) -> None:
-    """Mark stream as inactive in configuration on failure.
-    
-    Args:
-        stream_id: Stream ID to mark as inactive (optional)
-    """
+    """Mark stream as inactive in configuration on failure."""
     if not stream_id:
         return
     
     try:
         from ..config_io import load_streams, save_streams
         
-        streams = load_streams()
+        config = load_streams()
+        streams = config.get("streams", [])
+        
         for stream in streams:
             if stream.get("id") == stream_id and stream.get("status") != "stopped":
                 stream["status"] = "stopped"
-                save_streams(streams)
+                config["streams"] = streams
+                save_streams(config)
                 logger.warning(f"Marked stream {stream_id} as stopped due to failure")
                 break
                 
     except Exception as e:
         logger.error(f"Failed to mark stream {stream_id} as stopped: {e}")
+
 
 
 # ============================================================================

@@ -10,52 +10,21 @@ from ..models.zone import Zone, NewZone, EditZone
 
 logger = logging.getLogger(__name__)
 
-# ============================================================================
-# Constants
-# ============================================================================
-
 ZONES_KEY: Final[str] = "zones"
 
 
-# ============================================================================
-# Zones Service
-# ============================================================================
-
 class ZonesService:
-    """Service for managing detection zones within RTSP streams.
-    
-    Provides CRUD operations for zones that define regions of interest
-    within video streams for object detection and tracking.
-    """
+    """Service for managing detection zones within RTSP streams."""
     
     def __init__(self) -> None:
-        """Initialize zones service.
-        
-        Note: config_path parameter removed as it's not used.
-        Configuration is handled by config_io module.
-        """
+        """Initialize zones service."""
         pass
     
-    # ========================================================================
-    # Zone Retrieval
-    # ========================================================================
-    
     async def list_zones(self, stream_id: str) -> list[dict]:
-        """List all detection zones for a stream.
-        
-        Args:
-            stream_id: Stream UUID
-            
-        Returns:
-            List of zone dictionaries, empty list if stream not found
-            
-        Example:
-            >>> service = ZonesService()
-            >>> zones = await service.list_zones("stream-uuid")
-            >>> print(f"Found {len(zones)} zones")
-        """
+        """List all detection zones for a stream."""
         try:
-            streams = load_streams()
+            config = load_streams()
+            streams = config.get("streams", [])
             
             for stream in streams:
                 if stream.get("id") == stream_id:
@@ -71,20 +40,7 @@ class ZonesService:
             return []
     
     async def get_zone(self, stream_id: str, zone_id: str) -> dict | None:
-        """Get a specific zone by ID.
-        
-        Args:
-            stream_id: Stream UUID
-            zone_id: Zone UUID
-            
-        Returns:
-            Zone dictionary or None if not found
-            
-        Example:
-            >>> zone = await service.get_zone("stream-uuid", "zone-uuid")
-            >>> if zone:
-            ...     print(f"Zone: {zone['name']}")
-        """
+        """Get a specific zone by ID."""
         try:
             zones = await self.list_zones(stream_id)
             
@@ -103,32 +59,11 @@ class ZonesService:
             )
             return None
     
-    # ========================================================================
-    # Zone Creation
-    # ========================================================================
-    
     async def create_zone(self, stream_id: str, new_zone: NewZone) -> dict:
-        """Create a new detection zone for a stream.
-        
-        Args:
-            stream_id: Stream UUID
-            new_zone: Zone creation data
-            
-        Returns:
-            Created zone dictionary
-            
-        Raises:
-            ValueError: If stream not found or zone validation fails
-            
-        Example:
-            >>> new_zone = NewZone(
-            ...     name="Entry Zone",
-            ...     coordinates=[[0.1, 0.1], [0.9, 0.1], [0.5, 0.9]]
-            ... )
-            >>> zone = await service.create_zone("stream-uuid", new_zone)
-        """
+        """Create a new detection zone for a stream."""
         try:
-            streams = load_streams()
+            config = load_streams()
+            streams = config.get("streams", [])
             
             # Find target stream
             stream = self._find_stream(streams, stream_id)
@@ -152,7 +87,9 @@ class ZonesService:
             # Add to stream and persist
             zone_dict = zone.model_dump()
             stream[ZONES_KEY].append(zone_dict)
-            save_streams(streams)
+            
+            config["streams"] = streams
+            save_streams(config)
             
             logger.info(f"Created zone {zone.id} in stream {stream_id}")
             return zone_dict
@@ -163,35 +100,16 @@ class ZonesService:
             logger.error(f"Error creating zone for stream {stream_id}: {e}", exc_info=True)
             raise ValueError(f"Failed to create zone: {str(e)}")
     
-    # ========================================================================
-    # Zone Updates
-    # ========================================================================
-    
     async def update_zone(
         self,
         stream_id: str,
         zone_id: str,
         edit_zone: EditZone
     ) -> dict | None:
-        """Update an existing detection zone.
-        
-        Args:
-            stream_id: Stream UUID
-            zone_id: Zone UUID
-            edit_zone: Zone update data (partial update)
-            
-        Returns:
-            Updated zone dictionary or None if not found
-            
-        Raises:
-            ValueError: If zone validation fails
-            
-        Example:
-            >>> edit = EditZone(name="Updated Entry Zone")
-            >>> zone = await service.update_zone("stream-uuid", "zone-uuid", edit)
-        """
+        """Update an existing detection zone."""
         try:
-            streams = load_streams()
+            config = load_streams()
+            streams = config.get("streams", [])
             
             # Find target stream
             stream = self._find_stream(streams, stream_id)
@@ -218,7 +136,9 @@ class ZonesService:
                     
                     # Validate and persist
                     updated_zone = Zone(**zones[i])
-                    save_streams(streams)
+                    
+                    config["streams"] = streams
+                    save_streams(config)
                     
                     logger.info(f"Updated zone {zone_id} in stream {stream_id}")
                     return updated_zone.model_dump()
@@ -235,27 +155,11 @@ class ZonesService:
             )
             raise ValueError(f"Failed to update zone: {str(e)}")
     
-    # ========================================================================
-    # Zone Deletion
-    # ========================================================================
-    
     async def delete_zone(self, stream_id: str, zone_id: str) -> bool:
-        """Delete a detection zone.
-        
-        Args:
-            stream_id: Stream UUID
-            zone_id: Zone UUID
-            
-        Returns:
-            True if deleted, False if not found
-            
-        Example:
-            >>> success = await service.delete_zone("stream-uuid", "zone-uuid")
-            >>> if success:
-            ...     print("Zone deleted")
-        """
+        """Delete a detection zone."""
         try:
-            streams = load_streams()
+            config = load_streams()
+            streams = config.get("streams", [])
             
             # Find target stream
             stream = self._find_stream(streams, stream_id)
@@ -271,7 +175,8 @@ class ZonesService:
             
             # Check if anything was deleted
             if len(stream[ZONES_KEY]) < original_length:
-                save_streams(streams)
+                config["streams"] = streams
+                save_streams(config)
                 logger.info(f"Deleted zone {zone_id} from stream {stream_id}")
                 return True
             
@@ -285,20 +190,8 @@ class ZonesService:
             )
             return False
     
-    # ========================================================================
-    # Helper Methods
-    # ========================================================================
-    
     def _find_stream(self, streams: list[dict], stream_id: str) -> dict | None:
-        """Find stream by ID in streams list.
-        
-        Args:
-            streams: List of stream dictionaries
-            stream_id: Stream UUID to find
-            
-        Returns:
-            Stream dictionary or None if not found
-        """
+        """Find stream by ID in streams list."""
         for stream in streams:
             if stream.get("id") == stream_id:
                 return stream
@@ -310,19 +203,10 @@ class ZonesService:
         name: str,
         exclude_zone_id: str | None = None
     ) -> None:
-        """Validate zone name is unique within stream (case-insensitive).
+        """Validate zone name is unique within stream (case-insensitive)."""
+        from ..utils.strings import normalize_stream_name
         
-        Args:
-            stream: Stream dictionary
-            name: Zone name to validate
-            exclude_zone_id: Zone ID to exclude from check (for updates)
-            
-        Raises:
-            ValueError: If name is not unique
-        """
-        from ..utils.strings import normalize_zone_name
-        
-        normalized_name = normalize_zone_name(name)
+        normalized_name = normalize_stream_name(name)
         zones = stream.get(ZONES_KEY, [])
         
         for zone in zones:
@@ -330,7 +214,7 @@ class ZonesService:
             if exclude_zone_id and zone.get("id") == exclude_zone_id:
                 continue
             
-            if normalize_zone_name(zone.get("name", "")) == normalized_name:
+            if normalize_stream_name(zone.get("name", "")) == normalized_name:
                 raise ValueError(
                     f"Zone name '{name}' already exists in this stream "
                     "(case-insensitive)"
