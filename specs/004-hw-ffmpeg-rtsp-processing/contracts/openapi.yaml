@@ -1,0 +1,435 @@
+openapi: 3.0.3
+info:
+  title: ProxiMeter API - HW FFmpeg RTSP Processing
+  version: 1.0.0
+  description: Endpoints for managing RTSP streams with hardware-accelerated FFmpeg processing. Rate-limiting: 100 req/min per IP on non-MJPEG endpoints; exempt /health and /mjpeg.
+
+paths:
+  /streams:
+    get:
+      summary: List all streams
+      responses:
+        '200':
+          description: List of streams
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Stream'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: {type: string}
+                  code: {type: string}
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: {type: string}
+                  code: {type: string}
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: {type: string}
+                  code: {type: string}
+    post:
+      summary: Create a new stream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StreamCreate'
+      responses:
+        '201':
+          description: Created stream
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stream'
+  
+  /streams/{stream_id}:
+    get:
+      summary: Get stream by ID
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stream details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stream'
+    put:
+      summary: Update stream
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StreamUpdate'
+      responses:
+        '200':
+          description: Updated stream
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stream'
+    delete:
+      summary: Delete stream
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No content
+  
+  /streams/{stream_id}/start:
+    post:
+      summary: Start stream processing
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stream started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string}
+  
+  /streams/{stream_id}/stop:
+    post:
+      summary: Stop stream processing
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stream stopped
+  
+  /streams/{stream_id}/mjpeg:
+    get:
+      summary: Get MJPEG stream for display
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: MJPEG stream
+          content:
+            multipart/x-mixed-replace; boundary=--myboundary:
+              schema:
+                type: string
+                format: binary
+        '503':
+          description: Service Unavailable (e.g., disconnected)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: {type: string}
+                  code: {type: string}
+  
+  /streams/{stream_id}/zones:
+    get:
+      summary: List zones for stream
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of zones
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Zone'
+    post:
+      summary: Create zone
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ZoneCreate'
+      responses:
+        '201':
+          description: Created zone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Zone'
+  
+  /streams/{stream_id}/zones/{zone_id}:
+    get:
+      summary: Get zone
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Zone details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Zone'
+    put:
+      summary: Update zone
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ZoneUpdate'
+      responses:
+        '200':
+          description: Updated zone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Zone'
+    delete:
+      summary: Delete zone
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No content
+  
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, enum: [healthy, degraded, error]}
+                  details: {type: object, description: Includes streams array with accel info, e.g., {streams: [{id: "1", accel: "cuda"}]}}
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: {type: string}
+                  code: {type: string}
+  
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        '200':
+          description: Metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+  
+  /streams/{stream_id}/scores:
+    get:
+      summary: SSE stream for real-time scores
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: 'data: {"timestamp": "2025-10-23T12:00:00Z", "scores": [{"object_id": "obj1", "distance": 2.5, "coordinates": {"x": 0.5, "y": 0.3}, "size": 100}]}\n\n'
+
+components:
+  schemas:
+    Stream:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        url: {type: string, format: uri}
+        enabled: {type: boolean}
+        hw_accel_enabled: {type: boolean}
+        fallback_mode: {type: boolean, default: false}
+        ffmpeg_params: 
+          type: array
+          items: {type: string}
+        target_fps: {type: integer, minimum: 1, maximum: 30}
+        status: {type: string, enum: [stopped, starting, running, error, disconnected]}
+        zones: 
+          type: array
+          items: {$ref: '#/components/schemas/Zone'}
+    
+    StreamCreate:
+      type: object
+      required: [name, url]
+      properties:
+        name: {type: string}
+        url: {type: string, format: uri}
+        hw_accel_enabled: {type: boolean, default: true}
+        ffmpeg_params: 
+          type: array
+          items: {type: string}
+          description: Custom FFmpeg flags; defaults applied if empty. Array must not exceed 20 strings; reject invalid flags (e.g., non-GPU if hw_accel_enabled=true) with 400 error.
+          maxItems: 20
+        target_fps: {type: integer, default: 5, minimum: 1, maximum: 30}
+    
+    StreamUpdate:
+      type: object
+      properties:
+        name: {type: string}
+        url: {type: string, format: uri}
+        enabled: {type: boolean}
+        hw_accel_enabled: {type: boolean}
+        ffmpeg_params: 
+          type: array
+          items: {type: string}
+        target_fps: {type: integer}
+    
+    Zone:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        points: 
+          type: array
+          items:
+            type: object
+            properties:
+              x: {type: number, description: Normalized 0-1 relative to stream resolution}
+              y: {type: number, description: Normalized 0-1 relative to stream resolution}
+        enabled_metrics: 
+          type: array
+          items: {type: string, enum: [distance, coordinates, size]}
+        target_point:
+          type: object
+          properties:
+            x: {type: number, description: Normalized 0-1}
+            y: {type: number, description: Normalized 0-1}
+        active: {type: boolean}
+    
+    ZoneCreate:
+      type: object
+      required: [name, points]
+      properties:
+        name: {type: string}
+        points: 
+          type: array
+          items:
+            type: object
+            properties:
+              x: {type: number}
+              y: {type: number}
+        enabled_metrics: 
+          type: array
+          items: {type: string, enum: [distance, coordinates, size]}
+        target_point:
+          type: object
+          properties:
+            x: {type: number}
+            y: {type: number}
+    
+    ZoneUpdate:
+      type: object
+      properties:
+        name: {type: string}
+        points: 
+          type: array
+          items:
+            type: object
+            properties:
+              x: {type: number}
+              y: {type: number}
+        enabled_metrics: 
+          type: array
+          items: {type: string, enum: [distance, coordinates, size]}
+        target_point:
+          type: object
+          properties:
+            x: {type: number}
+            y: {type: number}
+        active: {type: boolean}

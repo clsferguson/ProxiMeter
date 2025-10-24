@@ -8,6 +8,8 @@ Object detection scoring for home automation (NOT NVR/recording). Real-time scor
 ## Active Technologies
 - TypeScript 5+, React 19.2, Node.js LTS + Vite, Tailwind CSS, shadcn/ui, React Router, Axios/fetch (003-frontend-react-migration)
 - N/A (stateless frontend) (003-frontend-react-migration)
+- Python 3.12 + FastAPI, Uvicorn, FFmpeg, opencv-python-headless, Shapely, Pydantic v2 (004-hw-ffmpeg-rtsp-processing)
+- N/A (only config.yml persisted via Docker volume) (004-hw-ffmpeg-rtsp-processing)
 
 ### Backend (Mandatory)
 - Python 3.12 (container base: python:3.12-slim-trixie)
@@ -80,10 +82,9 @@ cd frontend; npm run build; npm run test; npm run lint
 - Use `npx shadcn@latest add` for generating new UI components; do not hand-roll base components outside `/components/ui`
 
 ## Recent Changes
+- 004-hw-ffmpeg-rtsp-processing: Added Python 3.12 + FastAPI, Uvicorn, FFmpeg, opencv-python-headless, Shapely, Pydantic v2
 - 003-frontend-react-migration: Frontend now mandates Tailwind CSS + shadcn/ui with strict TypeScript and Vite dev server
 - 2025-10-21: Constitution v2.4.0 - Added Principle VIII enforcing shadcn/ui adoption; updated plan/spec/tasks templates and documentation accordingly
-- 2025-10-19: Constitution v2.3.0 - Clarified application purpose (object detection scoring for home automation, NOT NVR); added polygon zone management and scoring pipeline (distance/coordinates/size); made SSE mandatory, MQTT optional; updated React to 19.2
-- 2025-10-19: Constitution v2.2.0 - Added mandatory FFmpeg for RTSP processing; migrated to React TypeScript SPA with Vite; removed Jinja2 templates; backend now REST API only
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
