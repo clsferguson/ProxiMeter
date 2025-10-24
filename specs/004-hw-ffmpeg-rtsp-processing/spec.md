@@ -55,11 +55,11 @@ As a user, I want to view the live processed stream in the frontend so that I ca
 Error Responses: 400 for invalid input (e.g., bad FFmpeg params, invalid URL); 404 for non-existent stream_id; 503 for processing failures (e.g., GPU unavailable); all include JSON body `{error: "message", code: "ERR_INVALID_PARAMS"}`.
 For invalid RTSP URL: Return 400 with `{error: "Invalid URL format", details: "Must be rtsp://..."}`; test via POST with malformed URL.
 For MJPEG disconnection: Endpoint returns 503 after 5s timeout; client polls `/streams/{id}` for status update to 'disconnected'.
-- What happens when hardware acceleration is unavailable (e.g., no compatible GPU)? The system should gracefully fallback to software processing without crashing, notifying the user via logs or UI.
+- What happens when hardware acceleration is unavailable (e.g., no compatible GPU)? The container must fail-fast with an error exit, logging the issue and returning 503 via /health.
 - How does the system handle high-latency RTSP sources? It should maintain target FPS through frame skipping or buffering, ensuring the frontend receives consistent processed output.
 - What if the RTSP stream disconnects mid-processing? The backend should detect the failure, stop processing, and update the stream status in the frontend.
-- What if MJPEG encoding fails due to resource constraints? The system should fallback to a lower quality or alternative encoding, notifying via status updates.
-- What happens if user-specified FFmpeg parameters are invalid or incompatible with the detected GPU? The system should validate parameters on stream save, provide clear error messages in the UI, and fallback to defaults if possible.
+- What if MJPEG encoding fails due to resource constraints? The system should return 503 error and stop the stream, notifying via status updates.
+- What happens if user-specified FFmpeg parameters are invalid or incompatible with the detected GPU? The system should validate parameters on stream save, provide clear error messages in the UI, and reject the config without fallback.
 
 ## Requirements *(mandatory)*
 
@@ -76,8 +76,8 @@ For MJPEG disconnection: Endpoint returns 503 after 5s timeout; client polls `/s
   The MJPEG endpoint uses `boundary=--myboundary` (configurable via env var MJPEG_BOUNDARY, default 'frame') and `Content-Type: image/jpeg` per frame for <img> compatibility.
   'Processed frames' in MJPEG: JPEG images (640x480, 80% quality) with embedded metadata (EXIF: timestamp, stream_id); no separate API response.
   target_fps: Integer, default 5, min 1, max 30; values outside range return 400 error.
-- **FR-003**: The system must detect and utilize available hardware acceleration capabilities automatically, with fallback to software processing if hardware is unavailable.
-  On fallback, Stream status includes `fallback_mode: true` and `/health` details: `{streams: [{"id": "1", "accel": "software"}]}`.
+- **FR-003**: The system must detect and utilize available hardware acceleration capabilities automatically; if hardware is unavailable, the container must fail-fast with an error exit, preventing software fallback.
+  On failure, `/health` returns 503 with details: `{error: "Hardware acceleration unavailable", code: "ERR_GPU_UNAVAILABLE"}`.
 - **FR-004**: Stream configurations must include options to enable hardware acceleration, validated upon saving to ensure compatibility.
 - **FR-005**: Processing must include frame extraction and preparation suitable for object detection, with metrics like latency and FPS exposed via API for monitoring.
 The `/metrics` endpoint must expose Prometheus-formatted metrics including stream FPS, latency, and error rates (e.g., `stream_fps{stream_id="1"} 5.2`).

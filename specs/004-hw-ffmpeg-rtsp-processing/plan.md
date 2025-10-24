@@ -26,7 +26,7 @@ Technical Approach: Dynamically construct FFmpeg commands in backend using detec
 **Target Platform**: Linux/amd64 in Docker container  
 **Project Type**: Web application (FastAPI backend + React 19.2 TypeScript frontend with Vite)  
 **Performance Goals**: 5 FPS per stream with hardware-accelerated decoding, low latency (<200ms end-to-end)  
-**Constraints**: Real-time processing only, no video storage, GPU backend fail-fast with no fallback, LAN-only deployment  
+**Constraints**: Real-time processing only, no video storage, GPU backend fail-fast with no fallback (container exit on unavailability), LAN-only deployment  
 **Scale/Scope**: Up to 4 concurrent RTSP streams, single YOLO model, polygon zone management per stream
 
 ## Constitution Check

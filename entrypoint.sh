@@ -11,6 +11,22 @@ echo "Pydantic version: $(python -c 'import pydantic; print(pydantic.__version__
 echo "FFmpeg version: $(ffmpeg -version 2>/dev/null | head -1 || echo 'unknown')"
 echo "==============================="
 
+# Detect GPU backend
+GPU_BACKEND_DETECTED="none"
+if command -v nvidia-smi &> /dev/null; then
+    GPU_BACKEND_DETECTED="nvidia"
+    echo "Detected NVIDIA GPU"
+elif command -v rocm-smi &> /dev/null; then
+    GPU_BACKEND_DETECTED="amd"
+    echo "Detected AMD GPU"
+elif command -v vainfo &> /dev/null && vainfo | grep -q "VAProfile"; then
+    GPU_BACKEND_DETECTED="intel"
+    echo "Detected Intel GPU"
+else
+    echo "No supported GPU detected"
+fi
+export GPU_BACKEND_DETECTED
+
 # Check for CI_DRY_RUN mode
 if [ "${CI_DRY_RUN}" = "true" ] || [ "${CI_DRY_RUN}" = "1" ] || [ "${CI_DRY_RUN}" = "yes" ]; then
     echo "CI_DRY_RUN=true detected. Exiting without starting server."

@@ -8,6 +8,9 @@ opencv-python-headless==4.10.0.84
 starlette==0.38.6
 python-multipart==0.0.12
 prometheus-client==0.20.0
+shapely==2.0.6  # For polygon geometry
 
 # Optional/testing (not required for MVP)
 # pytest==8.2.0
+# ruff==0.6.8
+# mypy==1.11.2
