@@ -1,78 +1,158 @@
 """FastAPI application entry point."""
-from typing import Callable
-from fastapi import FastAPI, Request, status
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from starlette.exceptions import HTTPException as StarletteHTTPException
+from contextlib import asynccontextmanager
 import logging
 import os
 
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 from .api import health, streams, zones
+from .api.errors import (
+    validation_exception_handler,
+    http_exception_handler,
+    general_exception_handler
+)
 from .logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
-# Setup logging
+# Setup logging before anything else
 setup_logging()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan context manager.
+    
+    Handles startup and shutdown events using modern FastAPI pattern.
+    """
+    # Startup
+    logger.info("ProxiMeter starting up...")
+    logger.info("API documentation available at /docs")
+    
+    yield
+    
+    # Shutdown
+    logger.info("ProxiMeter shutting down...")
+
+
+# ============================================================================
+# Application Configuration
+# ============================================================================
 
 app = FastAPI(
     title="ProxiMeter",
-    description="RTSP Stream Management and Zone Detection API",
-    version="1.0.0"
+    description="RTSP Stream Management and Zone Detection API with GPU Acceleration",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
 )
 
-# Exception handlers
-async def validation_exception_handler(
-    request: Request, 
-    exc: RequestValidationError
-) -> JSONResponse:
-    """Handle Pydantic validation errors."""
-    logger.error(f"Validation error: {exc.errors()}")
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.errors(), "body": str(exc.body) if exc.body else None}
-    )
 
-async def http_exception_handler(
-    request: Request, 
-    exc: StarletteHTTPException
-) -> JSONResponse:
-    """Handle HTTP exceptions."""
-    logger.warning(f"HTTP exception: {exc.status_code} - {exc.detail}")
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail}
-    )
+# ============================================================================
+# Exception Handlers
+# ============================================================================
 
-# Register exception handlers - cast to the correct type
-app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore
-app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore
+# Register standardized exception handlers
+app.add_exception_handler(RequestValidationError, validation_exception_handler) # type: ignore
+app.add_exception_handler(StarletteHTTPException, http_exception_handler) # type: ignore
+app.add_exception_handler(Exception, general_exception_handler)
 
-# Include routers
-app.include_router(health.router)
-app.include_router(streams.router, prefix="/api")
-app.include_router(zones.router, prefix="/api")
+
+# ============================================================================
+# API Routers
+# ============================================================================
+
+# Health check endpoints (no prefix)
+app.include_router(
+    health.router,
+    tags=["health"]
+)
+
+# Stream management endpoints
+app.include_router(
+    streams.router,
+    prefix="/api/streams",
+    tags=["streams"]
+)
+
+# Zone management endpoints (includes /streams/{stream_id}/zones in path)
+app.include_router(
+    zones.router,
+    prefix="/api",
+    tags=["zones"]
+)
+
+
+# ============================================================================
+# Static File Serving
+# ============================================================================
 
 # Get static directory from environment or use default
-static_dir = os.getenv("STATIC_ROOT", "/app/src/app/static/frontend")
+STATIC_DIR = os.getenv("STATIC_ROOT", "/app/src/app/static/frontend")
 
-# Serve static files (frontend) - must be last
-if os.path.exists(static_dir):
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
-    logger.info(f"Serving static files from: {static_dir}")
+# Serve frontend static files (must be last to not override API routes)
+if os.path.exists(STATIC_DIR):
+    app.mount(
+        "/",
+        StaticFiles(directory=STATIC_DIR, html=True),
+        name="frontend"
+    )
+    logger.info(f"Serving static files from: {STATIC_DIR}")
 else:
-    logger.warning(f"Static directory not found: {static_dir}")
+    logger.warning(f"Static directory not found: {STATIC_DIR}")
+    logger.warning("Frontend will not be available")
+
+
+# ============================================================================
+# Application Info
+# ============================================================================
 
 logger.info("ProxiMeter application initialized")
+logger.info(f"Environment: {os.getenv('ENV', 'development')}")
+logger.info(f"Log level: {os.getenv('LOG_LEVEL', 'INFO')}")
 
-@app.on_event("startup")
-async def startup_event():
-    """Run on application startup."""
-    logger.info("ProxiMeter starting up...")
-    logger.info("API documentation available at /docs")
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Run on application shutdown."""
-    logger.info("ProxiMeter shutting down...")
+# ============================================================================
+# API Routes Summary
+# ============================================================================
+
+"""
+Available API Routes:
+
+Health:
+    GET  /health              - Comprehensive health check
+    GET  /health/live         - Kubernetes liveness probe
+    GET  /health/ready        - Kubernetes readiness probe
+    GET  /health/startup      - Kubernetes startup probe
+
+Streams:
+    GET    /api/streams                     - List all streams
+    POST   /api/streams                     - Create stream
+    GET    /api/streams/{id}                - Get stream
+    PUT    /api/streams/{id}                - Update stream
+    DELETE /api/streams/{id}                - Delete stream
+    POST   /api/streams/{id}/start          - Start stream
+    POST   /api/streams/{id}/stop           - Stop stream
+    POST   /api/streams/reorder              - Reorder streams
+    GET    /api/streams/{id}/mjpeg          - MJPEG stream
+    GET    /api/streams/{id}/scores         - SSE detection scores
+    GET    /api/streams/gpu-backend         - Get GPU backend
+    GET    /api/streams/metrics             - Prometheus metrics
+
+Zones:
+    GET    /api/streams/{stream_id}/zones                - List zones
+    POST   /api/streams/{stream_id}/zones                - Create zone
+    GET    /api/streams/{stream_id}/zones/{zone_id}      - Get zone
+    PUT    /api/streams/{stream_id}/zones/{zone_id}      - Update zone
+    DELETE /api/streams/{stream_id}/zones/{zone_id}      - Delete zone
+
+Documentation:
+    GET  /docs                - Swagger UI
+    GET  /redoc               - ReDoc UI
+    GET  /openapi.json        - OpenAPI schema
+"""
