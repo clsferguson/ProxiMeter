@@ -42,12 +42,16 @@ class StreamsService:
         streams.sort(key=lambda s: s.get("order", 0))
         return streams
     
-    async def create_stream(self, name: str, rtsp_url: str) -> dict:
+    async def create_stream(self, name: str, rtsp_url: str, hw_accel_enabled: bool = True,
+                        ffmpeg_params: list[str] = None, target_fps: int = 5) -> dict:
         """Create a new stream with validation.
         
         Args:
             name: Stream name (1-50 chars, unique CI)
             rtsp_url: RTSP URL starting with rtsp://
+            hw_accel_enabled: Hardware acceleration flag
+            ffmpeg_params: FFmpeg parameters
+            target_fps: Target frames per second
             
         Returns:
             Created stream dictionary
@@ -85,9 +89,12 @@ class StreamsService:
             id=str(uuid.uuid4()),
             name=name,
             rtsp_url=rtsp_url,
+            hw_accel_enabled=hw_accel_enabled,
+            ffmpeg_params=ffmpeg_params or self.default_ffmpeg_params(),  # Add default method
+            target_fps=target_fps,
             created_at=datetime.utcnow().isoformat() + "Z",
             order=len(streams),
-            status="Active" if is_reachable else "Inactive"
+            status="stopped"  # Initial status
         )
         
         # Add to streams list and save

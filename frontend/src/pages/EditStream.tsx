@@ -63,7 +63,12 @@ export default function EditStream() {
     try {
       setIsLoading(true)
       setError(null)
-      await updateStream(streamId, data)
+      // Transform ffmpeg_params back to array if string
+      const submitData = {
+        ...data,
+        ffmpeg_params: typeof data.ffmpeg_params === 'string' ? data.ffmpeg_params.split(' ').filter(Boolean) : data.ffmpeg_params
+      }
+      await updateStream(streamId, submitData)
       // Navigate back to dashboard after successful update
       navigate('/')
     } catch (err) {

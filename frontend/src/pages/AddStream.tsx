@@ -29,7 +29,12 @@ export default function AddStream() {
     try {
       setIsLoading(true)
       setError(null)
-      await createStream(data)
+      // Transform ffmpeg_params back to array if string
+      const submitData = {
+        ...data,
+        ffmpeg_params: typeof data.ffmpeg_params === 'string' ? data.ffmpeg_params.split(' ').filter(Boolean) : data.ffmpeg_params
+      }
+      await createStream(submitData)
       // Navigate back to dashboard after successful creation
       navigate('/')
     } catch (err) {

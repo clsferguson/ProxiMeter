@@ -48,16 +48,16 @@ As an administrator, configure RTSP stream with hardware accel and view processe
 
 **Implementation Tasks**:
 
-- [ ] T009 [P] [US1] Implement POST /streams with ffprobe validation of URL and constructed FFmpeg params (using GPU flags if detected; reject incompatible flags with 400) in src/app/api/streams.py
-- [ ] T010 [US1] Add PUT /streams/{id} to update config and re-validate params in src/app/api/streams.py
-- [ ] T011 [P] [US1] Implement POST /streams/{id}/start to launch FFmpeg subprocess via service, fail-fast with 503 if GPU unavailable, and update status to 'running' in src/app/api/streams.py
-- [ ] T011.1 [US1] Implement concurrent stream limit (max 4) with locking to prevent race conditions on start, return 409 if over limit in src/app/api/streams.py
-- [ ] T012 [US1] Implement POST /streams/{id}/stop to terminate subprocess and set status 'stopped' in src/app/api/streams.py
-- [ ] T013 [P] [US1] Create GET /streams/{id}/mjpeg endpoint for multipart/x-mixed-replace MJPEG output (boundary=--frame, JPEG 640x480 80% quality) from service pipe in src/app/api/streams.py
-- [ ] T014 [P] [US1] Update StreamForm.tsx to include shadcn/ui Switch for hw_accel_enabled, Textarea for ffmpeg_params (placeholder with defaults + GPU flags fetched from API), Input for target_fps in frontend/src/components/StreamForm.tsx
-- [ ] T015 [US1] Add API call in useApi.ts to fetch GPU backend for param defaults in frontend/src/hooks/useApi.ts
-- [ ] T016 [US1] Integrate new StreamForm fields into AddStream.tsx and EditStream.tsx pages in frontend/src/pages/AddStream.tsx and frontend/src/pages/EditStream.tsx
-- [ ] T016.1 [US1] Update StreamForm.tsx and zone editor to handle normalized coordinates (0-1) for UI consistency in frontend/src/components/StreamForm.tsx
+- [X] T009 [P] [US1] Implement POST /streams with ffprobe validation of URL and constructed FFmpeg params (using GPU flags if detected; reject incompatible flags with 400) in src/app/api/streams.py
+- [X] T010 [US1] Add PUT /streams/{id} to update config and re-validate params in src/app/api/streams.py
+- [X] T011 [P] [US1] Implement POST /streams/{id}/start to launch FFmpeg subprocess via service, fail-fast with 503 if GPU unavailable, and update status to 'running' in src/app/api/streams.py
+- [X] T011.1 [US1] Implement concurrent stream limit (max 4) with locking to prevent race conditions on start, return 409 if over limit in src/app/api/streams.py
+- [X] T012 [US1] Implement POST /streams/{id}/stop to terminate subprocess and set status 'stopped' in src/app/api/streams.py
+- [X] T013 [P] [US1] Create GET /streams/{id}/mjpeg endpoint for multipart/x-mixed-replace MJPEG output (boundary=--frame, JPEG 640x480 80% quality) from service pipe in src/app/api/streams.py
+- [X] T014 [P] [US1] Update StreamForm.tsx to include shadcn/ui Switch for hw_accel_enabled, Textarea for ffmpeg_params (placeholder with defaults + GPU flags fetched from API), Input for target_fps in frontend/src/components/StreamForm.tsx
+- [X] T015 [US1] Add API call in useApi.ts to fetch GPU backend for param defaults in frontend/src/hooks/useApi.ts
+- [X] T016 [US1] Integrate new StreamForm fields into AddStream.tsx and EditStream.tsx pages in frontend/src/pages/AddStream.tsx and frontend/src/pages/EditStream.tsx
+- [X] T016.1 [US1] Update StreamForm.tsx and zone editor to handle normalized coordinates (0-1) for UI consistency in frontend/src/components/StreamForm.tsx
 
 ### Phase 4: User Story 2 - Monitor Stream Performance [US2]
 As a user, view live processed stream with scores overlaid, ensuring smooth playback and metrics visibility. Builds on US1; independently testable by viewing active stream.

@@ -61,6 +61,13 @@ export function useApi<T, Args extends unknown[] = []>(
   }
 }
 
+export async function getGpuBackend(): Promise<{gpu_backend: string}> {
+  const response = await fetch('/api/streams/gpu-backend')
+  if (!response.ok) throw new Error('Failed to fetch GPU backend')
+  return response.json()
+}
+
+
 /**
  * Hook for managing form submission state
  */

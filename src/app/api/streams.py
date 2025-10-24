@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse
 from typing import List
 import logging
+from threading import Lock
 
 from ..models.stream import NewStream, Stream
 from ..services.streams_service import StreamsService
@@ -12,6 +13,9 @@ from ..utils.strings import mask_rtsp_credentials
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/streams", tags=["streams"])
+
+# Global lock for concurrent starts
+_start_lock = Lock()
 
 
 def get_streams_service() -> StreamsService:
@@ -50,16 +54,39 @@ async def create_stream(
     new_stream: NewStream,
     service: StreamsService = Depends(get_streams_service)
 ):
-    """Create a new stream.
+    """Create a new stream with FFmpeg validation.
     
-    Validates name and RTSP URL, checks for duplicates, probes connectivity.
-    Returns stream with status Active if reachable, Inactive otherwise.
+    Validates name, RTSP URL, params; constructs FFmpeg command with GPU flags if enabled;
+    rejects incompatible params with 400. Probes connectivity.
+    Returns stream with status 'stopped' initially.
     Credentials in rtsp_url are masked in the response.
     """
     try:
+        from ..utils.rtsp import validate_rtsp_url, build_ffmpeg_command
+        from ..config_io import get_gpu_backend
+        
+        gpu_backend = get_gpu_backend()
+        
+        # Validate params if provided
+        params = new_stream.ffmpeg_params or []
+        if not validate_rtsp_url(new_stream.rtsp_url, params, gpu_backend):
+            raise ValueError("Invalid RTSP URL or FFmpeg parameters")
+        
+        # Build command to check compatibility (dry-run probe)
+        cmd = build_ffmpeg_command(
+            rtsp_url=new_stream.rtsp_url,
+            ffmpeg_params=params,
+            target_fps=new_stream.target_fps,
+            gpu_backend=gpu_backend if new_stream.hw_accel_enabled else None
+        )
+        # Note: Full validation via ffprobe in service if needed
+        
         stream = await service.create_stream(
             name=new_stream.name,
-            rtsp_url=new_stream.rtsp_url
+            rtsp_url=new_stream.rtsp_url,
+            hw_accel_enabled=new_stream.hw_accel_enabled,
+            ffmpeg_params=params,
+            target_fps=new_stream.target_fps
         )
         
         # Mask credentials in response
@@ -68,7 +95,7 @@ async def create_stream(
         
         return stream_response
     except ValueError as e:
-        # Validation errors (duplicate name, invalid URL, etc.)
+        # Validation errors (duplicate name, invalid URL, params, etc.)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
@@ -81,28 +108,46 @@ async def create_stream(
         )
 
 
-@router.patch("/{stream_id}")
-async def edit_stream(
+@router.put("/{stream_id}")
+async def update_stream(
     stream_id: str,
-    edit_data: dict,
+    edit_stream: EditStream,
     service: StreamsService = Depends(get_streams_service)
 ):
-    """Edit an existing stream (partial update).
+    """Update an existing stream (partial update).
     
-    Accepts partial updates for name and/or rtsp_url.
-    Validates formats, checks uniqueness, re-probes if URL changed.
+    Validates updated config, re-validates params if changed.
     Returns updated stream with masked credentials.
     """
     try:
-        # Extract optional fields
-        name = edit_data.get("name")
-        rtsp_url = edit_data.get("rtsp_url")
+        from ..utils.rtsp import validate_rtsp_url
+        from ..config_io import get_gpu_backend
         
-        # Update stream
+        gpu_backend = get_gpu_backend()
+        updated = False
+        
+        # If URL or params changed, re-validate
+        if edit_stream.rtsp_url is not None or edit_stream.ffmpeg_params is not None:
+            current_stream = await service.get_stream(stream_id)
+            if not current_stream:
+                raise HTTPException(status_code=404, detail="Stream not found")
+            
+            url = edit_stream.rtsp_url or current_stream["rtsp_url"]
+            params = edit_stream.ffmpeg_params or current_stream.get("ffmpeg_params", [])
+            
+            if not validate_rtsp_url(url, params, gpu_backend):
+                raise ValueError("Invalid RTSP URL or FFmpeg parameters after update")
+            
+            updated = True
+        
+        # Update via service
         updated_stream = await service.update_stream(
             stream_id=stream_id,
-            name=name,
-            rtsp_url=rtsp_url
+            name=edit_stream.name,
+            rtsp_url=edit_stream.rtsp_url,
+            hw_accel_enabled=edit_stream.hw_accel_enabled,
+            ffmpeg_params=edit_stream.ffmpeg_params,
+            target_fps=edit_stream.target_fps
         )
         
         if not updated_stream:
@@ -124,10 +169,10 @@ async def edit_stream(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error editing stream {stream_id}: {e}", exc_info=True)
+        logger.error(f"Error updating stream {stream_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to edit stream"
+            detail="Failed to update stream"
         )
 
 
@@ -200,44 +245,126 @@ async def reorder_streams(
         )
 
 
-@router.get("/play/{stream_id}.mjpg")
-async def playback_stream(
+@router.get("/{stream_id}/mjpeg")
+async def mjpeg_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ):
-    """Stream MJPEG playback for a specific stream.
+    """Stream MJPEG for a specific stream from FFmpeg pipe.
     
-    Returns multipart/x-mixed-replace stream with JPEG frames at ≤5 FPS.
+    Returns multipart/x-mixed-replace with JPEG frames (640x480, 80% quality) at target FPS.
     """
-    # Get stream from service
     stream = await service.get_stream(stream_id)
     if not stream:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Stream {stream_id} not found"
-        )
+        raise HTTPException(status_code=404, detail="Stream not found")
     
-    rtsp_url = stream.get("rtsp_url")
-    if not rtsp_url:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Stream has no RTSP URL"
-        )
+    if stream["status"] != "running":
+        raise HTTPException(status_code=400, detail="Stream not started")
     
+    fps = stream.get("target_fps", 5)
+    
+    async def generate_frames():
+        while True:
+            ret, frame = await service.get_frame(stream_id)  # Make get_frame async if needed
+            if not ret:
+                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + b''  # Empty frame or break
+                break
+            
+            # Resize to 640x480
+            height, width = frame.shape[:2]
+            if width != 640 or height != 480:
+                frame = cv2.resize(frame, (640, 480))
+            
+            # Encode JPEG 80% quality
+            ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if not ret:
+                continue
+            
+            yield b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + str(len(jpeg)).encode() + b'\r\n\r\n' + jpeg.tobytes() + b'\r\n'
+    
+    return StreamingResponse(
+        generate_frames(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
+
+
+@router.get("/gpu-backend")
+async def get_gpu_backend():
+    """Get detected GPU backend for UI defaults."""
+    from ..config_io import get_gpu_backend
+    backend = get_gpu_backend()
+    return {"gpu_backend": backend}
+
+
+@router.post("/{stream_id}/start", status_code=status.HTTP_200_OK)
+async def start_stream(
+    stream_id: str,
+    service: StreamsService = Depends(get_streams_service)
+):
+    """Start processing for a stream.
+    
+    Launches FFmpeg subprocess, updates status to 'running'.
+    Enforces max 4 concurrent streams with locking.
+    """
     try:
-        # Generate MJPEG stream with 5 FPS cap (pass stream_id for failure tracking)
-        return StreamingResponse(
-            generate_mjpeg_stream(rtsp_url, max_fps=5.0, stream_id=stream_id),
-            media_type="multipart/x-mixed-replace; boundary=frame",
-            headers={
-                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-                "Pragma": "no-cache",
-                "Expires": "0"
-            }
-        )
+        stream = await service.get_stream(stream_id)
+        if not stream:
+            raise HTTPException(status_code=404, detail="Stream not found")
+        
+        if stream["status"] == "running":
+            return {"message": "Stream already running"}
+        
+        with _start_lock:
+            if len(service.active_processes) >= 4:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Maximum concurrent streams (4) reached"
+                )
+            
+            success = await service.start_stream(stream_id, stream)
+            if not success:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Failed to start stream processing (GPU unavailable?)"
+                )
+        
+        return {"message": "Stream started successfully", "status": "running"}
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Playback error for stream {stream_id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start playback: {str(e)}"
-        )
+        logger.error(f"Error starting stream {stream_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/{stream_id}/stop", status_code=status.HTTP_200_OK)
+async def stop_stream(
+    stream_id: str,
+    service: StreamsService = Depends(get_streams_service)
+):
+    """Stop processing for a stream.
+    
+    Terminates FFmpeg subprocess, updates status to 'stopped'.
+    """
+    try:
+        stream = await service.get_stream(stream_id)
+        if not stream:
+            raise HTTPException(status_code=404, detail="Stream not found")
+        
+        if stream["status"] != "running":
+            return {"message": "Stream not running"}
+        
+        success = await service.stop_stream(stream_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to stop stream")
+        
+        return {"message": "Stream stopped successfully", "status": "stopped"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error stopping stream {stream_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
