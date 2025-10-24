@@ -1,33 +1,25 @@
-"""Zone Pydantic models."""
-
+"""Zone models for Pydantic validation."""
 from pydantic import BaseModel, Field
-from typing import List, Optional
-from datetime import datetime
+from typing import List, Tuple
 import uuid
 
-class Point(BaseModel):
-    x: float = Field(..., ge=0, le=1, description="Normalized x (0-1)")
-    y: float = Field(..., ge=0, le=1, description="Normalized y (0-1)")
-
-class Zone(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    stream_id: str
-    name: str = Field(..., min_length=1, max_length=50)
-    points: List[Point] = Field(..., min_items=3)
-    enabled_metrics: List[str] = Field(default=["distance", "coordinates", "size"])
-    target_point: Optional[Point] = None
-    active: bool = Field(default=True)
-    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
-
 class NewZone(BaseModel):
-    name: str = Field(..., min_length=1, max_length=50)
-    points: List[Point] = Field(..., min_items=3)
-    enabled_metrics: List[str] = Field(default=["distance", "coordinates", "size"])
-    target_point: Optional[Point] = None
+    """Model for creating a new zone."""
+    name: str = Field(..., min_length=1, max_length=50, description="Zone name")
+    coordinates: List[Tuple[int, int]] = Field(
+        ..., 
+        min_length=3, 
+        description="Polygon coordinates (at least 3 points)"
+    )
 
 class EditZone(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=50)
-    points: Optional[List[Point]] = Field(None, min_items=3)
-    enabled_metrics: Optional[List[str]] = None
-    target_point: Optional[Point] = None
-    active: Optional[bool] = None
+    """Model for editing a zone."""
+    name: str | None = Field(None, min_length=1, max_length=50)
+    coordinates: List[Tuple[int, int]] | None = Field(None, min_length=3)
+
+class Zone(BaseModel):
+    """Complete zone model with all fields."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    stream_id: str
+    name: str = Field(min_length=1, max_length=50)
+    coordinates: List[Tuple[int, int]] = Field(min_length=3)

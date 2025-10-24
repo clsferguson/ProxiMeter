@@ -1,84 +1,78 @@
-"""FastAPI ASGI application entry point."""
-from fastapi import FastAPI, Response, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+"""FastAPI application entry point."""
+from typing import Callable
+from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi import Request
-from fastapi.responses import JSONResponse  # Not starlette.responses
-
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
-from pathlib import Path
+import os
 
-# Configure logging first
-from .logging_config import configure_logging
-configure_logging()
+from .api import health, streams, zones
+from .logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
+# Setup logging
+setup_logging()
+
 app = FastAPI(
     title="ProxiMeter",
-    version="0.2.0",
-    docs_url=None,  # Disable docs for LAN-only deployment
-    redoc_url=None,
+    description="RTSP Stream Management and Zone Detection API",
+    version="1.0.0"
 )
 
-# Import routers
-from .api import health, streams
-from .ui import views
+# Exception handlers
+async def validation_exception_handler(
+    request: Request, 
+    exc: RequestValidationError
+) -> JSONResponse:
+    """Handle Pydantic validation errors."""
+    logger.error(f"Validation error: {exc.errors()}")
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors(), "body": str(exc.body) if exc.body else None}
+    )
 
-# Import middleware
-from .middleware.rate_limit import RateLimitMiddleware
-from .middleware.request_id import RequestIDMiddleware
+async def http_exception_handler(
+    request: Request, 
+    exc: StarletteHTTPException
+) -> JSONResponse:
+    """Handle HTTP exceptions."""
+    logger.warning(f"HTTP exception: {exc.status_code} - {exc.detail}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail}
+    )
 
-# Import error handlers
-from .api.errors import (
-    validation_exception_handler,
-    http_exception_handler,
-    general_exception_handler,
-)
-
-# Add middleware (order matters: last added = first executed)
-# 1. Request ID (first to execute, adds ID to all requests)
-app.add_middleware(RequestIDMiddleware)
-
-# 2. Rate limiting (after request ID, before business logic)
-app.add_middleware(RateLimitMiddleware, requests_per_second=5.0, burst=10)
-
-# Register exception handlers
-app.add_exception_handler(RequestValidationError, validation_exception_handler) 
-app.add_exception_handler(HTTPException, http_exception_handler)
-app.add_exception_handler(Exception, general_exception_handler)
+# Register exception handlers - cast to the correct type
+app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore
 
 # Include routers
-# Health endpoint (no prefix)
 app.include_router(health.router)
+app.include_router(streams.router, prefix="/api")
+app.include_router(zones.router, prefix="/api")
 
-# API endpoints
-app.include_router(streams.router)
+# Get static directory from environment or use default
+static_dir = os.getenv("STATIC_ROOT", "/app/src/app/static/frontend")
 
-# UI views (no prefix, serves from root)
-app.include_router(views.router)
+# Serve static files (frontend) - must be last
+if os.path.exists(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
+    logger.info(f"Serving static files from: {static_dir}")
+else:
+    logger.warning(f"Static directory not found: {static_dir}")
 
-# Metrics endpoint
-from .metrics import get_metrics
+logger.info("ProxiMeter application initialized")
 
-@app.get("/metrics", tags=["monitoring"])
-async def metrics_endpoint():
-    """Prometheus metrics endpoint.
-    
-    Returns:
-        Response: Prometheus-format metrics
-    """
-    body, status_code, headers = get_metrics()
-    return Response(content=body, status_code=status_code, headers=headers)
+@app.on_event("startup")
+async def startup_event():
+    """Run on application startup."""
+    logger.info("ProxiMeter starting up...")
+    logger.info("API documentation available at /docs")
 
-# Mount static files
-static_dir = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-
-# Template configuration (for reference, actual templates configured in views.py)
-templates_dir = Path(__file__).parent / "templates"
-templates = Jinja2Templates(directory=str(templates_dir))
-
-logger.info("FastAPI app initialized with routers and middleware")
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Run on application shutdown."""
+    logger.info("ProxiMeter shutting down...")
