@@ -10,7 +10,7 @@
       "@/*": ["./*"]
     },
     "types": ["vite/client", "vitest/globals", "next-themes"],
-    "skipLibCheck": false,
+    "skipLibCheck": true,
 
     /* Bundler mode */
     "moduleResolution": "bundler",

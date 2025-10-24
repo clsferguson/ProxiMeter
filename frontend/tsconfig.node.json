@@ -9,7 +9,7 @@
       "@/*": ["./*"]
     },
     "types": ["node"],
-    "skipLibCheck": false,
+    "skipLibCheck": true,
 
     /* Bundler mode */
     "moduleResolution": "bundler",
