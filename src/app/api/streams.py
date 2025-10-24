@@ -1,15 +1,18 @@
 """REST API endpoints for stream management."""
-from fastapi import APIRouter, HTTPException, status, Depends
-from fastapi.responses import StreamingResponse, Response
-from typing import List, Optional
-import logging
+from __future__ import annotations
+
 import asyncio
 import json
+import logging
 import random
-from datetime import datetime
-import cv2
+from datetime import datetime, timezone
+from typing import Final
 
-from ..models.stream import NewStream, Stream, EditStream
+import cv2
+from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi.responses import StreamingResponse, Response
+
+from ..models.stream import NewStream, EditStream, ReorderRequest
 from ..services.streams_service import StreamsService
 from ..utils.rtsp import validate_rtsp_url, build_ffmpeg_command
 from ..utils.strings import mask_rtsp_credentials
@@ -19,36 +22,38 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["streams"])
 
-# Global asyncio lock for concurrent stream starts
+# ============================================================================
+# Constants
+# ============================================================================
+
+MAX_CONCURRENT_STREAMS: Final[int] = 4
+MJPEG_FRAME_SIZE: Final[tuple[int, int]] = (640, 480)
+MJPEG_QUALITY: Final[int] = 80
+SSE_FPS: Final[int] = 5
+
+# Global lock for concurrent stream starts
 _start_lock = asyncio.Lock()
 
-# Constants
-MAX_CONCURRENT_STREAMS = 4
-MJPEG_FRAME_SIZE = (640, 480)
-MJPEG_QUALITY = 80
-SSE_FPS = 5
 
+# ============================================================================
+# Dependencies
+# ============================================================================
 
 def get_streams_service() -> StreamsService:
     """Dependency injection for streams service."""
     return StreamsService()
 
 
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
 async def validate_stream_config(
     rtsp_url: str,
-    ffmpeg_params: Optional[List[str]],
+    ffmpeg_params: list[str] | None,
     hw_accel_enabled: bool
 ) -> None:
-    """Validate stream configuration.
-    
-    Args:
-        rtsp_url: RTSP URL to validate
-        ffmpeg_params: FFmpeg parameters
-        hw_accel_enabled: Whether hardware acceleration is enabled
-        
-    Raises:
-        ValueError: If configuration is invalid
-    """
+    """Validate stream configuration."""
     gpu_backend = get_gpu_backend()
     params = ffmpeg_params or []
     
@@ -65,33 +70,87 @@ async def validate_stream_config(
 
 
 def mask_stream_response(stream: dict) -> dict:
-    """Mask RTSP credentials in stream response.
-    
-    Args:
-        stream: Stream dictionary
-        
-    Returns:
-        Stream with masked credentials
-    """
+    """Mask RTSP credentials in stream response."""
     masked = stream.copy()
     if "rtsp_url" in masked:
         masked["rtsp_url"] = mask_rtsp_credentials(masked["rtsp_url"])
     return masked
 
 
+def encode_frame_to_jpeg(frame) -> bytes | None:
+    """Encode frame to JPEG (blocking operation for thread pool)."""
+    try:
+        height, width = frame.shape[:2]
+        if width != MJPEG_FRAME_SIZE[0] or height != MJPEG_FRAME_SIZE[1]:
+            frame = cv2.resize(frame, MJPEG_FRAME_SIZE)
+        
+        ret, jpeg = cv2.imencode(
+            '.jpg', 
+            frame, 
+            [cv2.IMWRITE_JPEG_QUALITY, MJPEG_QUALITY]
+        )
+        if not ret:
+            return None
+        
+        return jpeg.tobytes()
+    except Exception as e:
+        logger.error(f"Error encoding frame: {e}")
+        return None
+
+
+# ============================================================================
+# Utility Endpoints (MUST BE BEFORE /{stream_id} ROUTES)
+# ============================================================================
+
+@router.get("/gpu-backend")
+async def get_gpu_info() -> dict:
+    """Get detected GPU backend.
+    
+    Returns:
+        GPU backend information
+    """
+    backend = get_gpu_backend()
+    return {"gpu_backend": backend}
+
+
+@router.post("/reorder")
+async def reorder_streams(
+    reorder_data: ReorderRequest,
+    service: StreamsService = Depends(get_streams_service)
+) -> dict:
+    """Reorder streams.
+    
+    Args:
+        reorder_data: {"order": ["uuid1", "uuid2", ...]}
+        
+    Returns:
+        Success status
+    """
+    try:
+        success = await service.reorder_streams(reorder_data.order)
+        return {"success": success, "message": "Streams reordered successfully"}
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error reordering streams: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reorder streams"
+        )
+
+
 # ============================================================================
 # CRUD Endpoints
 # ============================================================================
 
-@router.get("", response_model=List[dict])
+@router.get("")
 async def list_streams(
     service: StreamsService = Depends(get_streams_service)
-) -> List[dict]:
-    """List all streams with masked credentials.
-    
-    Returns:
-        List of streams sorted by order field with masked credentials
-    """
+) -> list[dict]:
+    """List all streams with masked credentials."""
     try:
         streams = await service.list_streams()
         return [mask_stream_response(stream) for stream in streams]
@@ -108,18 +167,7 @@ async def create_stream(
     new_stream: NewStream,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Create a new stream with validation.
-    
-    Args:
-        new_stream: Stream configuration
-        
-    Returns:
-        Created stream with masked credentials
-        
-    Raises:
-        HTTPException 400: Invalid configuration
-        HTTPException 500: Server error
-    """
+    """Create a new stream with validation."""
     try:
         # Validate configuration
         await validate_stream_config(
@@ -133,12 +181,11 @@ async def create_stream(
             name=new_stream.name,
             rtsp_url=new_stream.rtsp_url,
             hw_accel_enabled=new_stream.hw_accel_enabled,
-            ffmpeg_params=new_stream.ffmpeg_params or [],
+            ffmpeg_params=new_stream.ffmpeg_params,
             target_fps=new_stream.target_fps
         )
         
         return mask_stream_response(stream)
-        
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -157,17 +204,7 @@ async def get_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Get a single stream by ID.
-    
-    Args:
-        stream_id: Stream UUID
-        
-    Returns:
-        Stream with masked credentials
-        
-    Raises:
-        HTTPException 404: Stream not found
-    """
+    """Get a single stream by ID."""
     try:
         stream = await service.get_stream(stream_id)
         if not stream:
@@ -186,6 +223,7 @@ async def get_stream(
         )
 
 
+@router.patch("/{stream_id}")
 @router.put("/{stream_id}")
 async def update_stream(
     stream_id: str,
@@ -194,16 +232,7 @@ async def update_stream(
 ) -> dict:
     """Update an existing stream (partial update).
     
-    Args:
-        stream_id: Stream UUID
-        edit_stream: Fields to update
-        
-    Returns:
-        Updated stream with masked credentials
-        
-    Raises:
-        HTTPException 400: Invalid configuration
-        HTTPException 404: Stream not found
+    Supports both PATCH and PUT methods.
     """
     try:
         # Get current stream
@@ -218,7 +247,11 @@ async def update_stream(
         if edit_stream.rtsp_url is not None or edit_stream.ffmpeg_params is not None:
             url = edit_stream.rtsp_url or current_stream["rtsp_url"]
             params = edit_stream.ffmpeg_params or current_stream.get("ffmpeg_params", [])
-            hw_accel = edit_stream.hw_accel_enabled if edit_stream.hw_accel_enabled is not None else current_stream.get("hw_accel_enabled", False)
+            hw_accel = (
+                edit_stream.hw_accel_enabled 
+                if edit_stream.hw_accel_enabled is not None 
+                else current_stream.get("hw_accel_enabled", False)
+            )
             
             await validate_stream_config(url, params, hw_accel)
         
@@ -227,6 +260,7 @@ async def update_stream(
             stream_id=stream_id,
             name=edit_stream.name,
             rtsp_url=edit_stream.rtsp_url,
+            status=edit_stream.status,
             hw_accel_enabled=edit_stream.hw_accel_enabled,
             ffmpeg_params=edit_stream.ffmpeg_params,
             target_fps=edit_stream.target_fps
@@ -239,7 +273,6 @@ async def update_stream(
             )
         
         return mask_stream_response(updated_stream)
-        
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -260,14 +293,7 @@ async def delete_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> None:
-    """Delete a stream.
-    
-    Args:
-        stream_id: Stream UUID
-        
-    Raises:
-        HTTPException 404: Stream not found
-    """
+    """Delete a stream."""
     try:
         deleted = await service.delete_stream(stream_id)
         if not deleted:
@@ -289,24 +315,12 @@ async def delete_stream(
 # Stream Control Endpoints
 # ============================================================================
 
-@router.post("/{stream_id}/start", status_code=status.HTTP_200_OK)
+@router.post("/{stream_id}/start")
 async def start_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Start stream processing.
-    
-    Args:
-        stream_id: Stream UUID
-        
-    Returns:
-        Success message and status
-        
-    Raises:
-        HTTPException 404: Stream not found
-        HTTPException 409: Maximum concurrent streams reached
-        HTTPException 503: Failed to start
-    """
+    """Start stream processing."""
     try:
         stream = await service.get_stream(stream_id)
         if not stream:
@@ -333,7 +347,6 @@ async def start_stream(
                 )
         
         return {"message": "Stream started successfully", "status": "running"}
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -344,22 +357,12 @@ async def start_stream(
         )
 
 
-@router.post("/{stream_id}/stop", status_code=status.HTTP_200_OK)
+@router.post("/{stream_id}/stop")
 async def stop_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Stop stream processing.
-    
-    Args:
-        stream_id: Stream UUID
-        
-    Returns:
-        Success message and status
-        
-    Raises:
-        HTTPException 404: Stream not found
-    """
+    """Stop stream processing."""
     try:
         stream = await service.get_stream(stream_id)
         if not stream:
@@ -379,7 +382,6 @@ async def stop_stream(
             )
         
         return {"message": "Stream stopped successfully", "status": "stopped"}
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -390,92 +392,16 @@ async def stop_stream(
         )
 
 
-@router.post("/reorder")
-async def reorder_streams(
-    reorder_data: dict,
-    service: StreamsService = Depends(get_streams_service)
-) -> dict:
-    """Reorder streams.
-    
-    Args:
-        reorder_data: {"order": ["uuid1", "uuid2", ...]}
-        
-    Returns:
-        Success status
-        
-    Raises:
-        HTTPException 400: Invalid order data
-    """
-    try:
-        order = reorder_data.get("order", [])
-        
-        if not isinstance(order, list):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Order must be a list of stream IDs"
-            )
-        
-        success = await service.reorder_streams(order)
-        return {"success": success, "message": "Streams reordered successfully"}
-        
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error reordering streams: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to reorder streams"
-        )
-
-
 # ============================================================================
 # Streaming Endpoints
 # ============================================================================
-
-def encode_frame_to_jpeg(frame) -> Optional[bytes]:
-    """Encode frame to JPEG (blocking operation for thread pool).
-    
-    Args:
-        frame: OpenCV frame
-        
-    Returns:
-        JPEG bytes or None if encoding failed
-    """
-    try:
-        height, width = frame.shape[:2]
-        if width != MJPEG_FRAME_SIZE[0] or height != MJPEG_FRAME_SIZE[1]:
-            frame = cv2.resize(frame, MJPEG_FRAME_SIZE)
-        
-        ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, MJPEG_QUALITY])
-        if not ret:
-            return None
-        
-        return jpeg.tobytes()
-    except Exception as e:
-        logger.error(f"Error encoding frame: {e}")
-        return None
-
 
 @router.get("/{stream_id}/mjpeg")
 async def stream_mjpeg(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> StreamingResponse:
-    """Stream MJPEG for a specific stream.
-    
-    Args:
-        stream_id: Stream UUID
-        
-    Returns:
-        Multipart MJPEG stream
-        
-    Raises:
-        HTTPException 400: Stream not running
-        HTTPException 404: Stream not found
-    """
+    """Stream MJPEG for a specific stream."""
     stream = await service.get_stream(stream_id)
     if not stream:
         raise HTTPException(
@@ -486,7 +412,7 @@ async def stream_mjpeg(
     if stream["status"] != "running":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Stream not running"
+            detail="Stream must be started before viewing. Use POST /{stream_id}/start first."
         )
     
     fps = stream.get("target_fps", 5)
@@ -513,7 +439,6 @@ async def stream_mjpeg(
                     jpeg_bytes + b'\r\n'
                 )
                 await asyncio.sleep(1 / fps)
-                
         except asyncio.CancelledError:
             logger.info(f"MJPEG stream cancelled for {stream_id}")
             raise
@@ -537,18 +462,7 @@ async def stream_scores_sse(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> StreamingResponse:
-    """SSE endpoint for real-time detection scores.
-    
-    Args:
-        stream_id: Stream UUID
-        
-    Returns:
-        Server-sent events stream
-        
-    Raises:
-        HTTPException 400: Stream not running
-        HTTPException 404: Stream not found
-    """
+    """SSE endpoint for real-time detection scores."""
     stream = await service.get_stream(stream_id)
     if not stream:
         raise HTTPException(
@@ -578,12 +492,11 @@ async def stream_scores_sse(
                     "distance": random.uniform(0, 1),
                     "coordinates": {"x": random.uniform(0, 1), "y": random.uniform(0, 1)},
                     "size": random.randint(50, 200),
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 
                 yield f"data: {json.dumps(score)}\n\n"
                 await asyncio.sleep(1 / SSE_FPS)
-                
         except asyncio.CancelledError:
             logger.info(f"SSE stream cancelled for {stream_id}")
             raise
@@ -599,30 +512,3 @@ async def stream_scores_sse(
             "X-Accel-Buffering": "no"
         }
     )
-
-
-# ============================================================================
-# Utility Endpoints
-# ============================================================================
-
-@router.get("/gpu-backend")
-async def get_gpu_info() -> dict:
-    """Get detected GPU backend.
-    
-    Returns:
-        GPU backend information
-    """
-    backend = get_gpu_backend()
-    return {"gpu_backend": backend}
-
-
-@router.get("/metrics")
-async def get_prometheus_metrics() -> Response:
-    """Prometheus metrics endpoint.
-    
-    Returns:
-        Prometheus-formatted metrics
-    """
-    from ..metrics import get_metrics
-    body, status_code, headers = get_metrics()
-    return Response(content=body, status_code=status_code, headers=headers)
