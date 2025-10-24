@@ -44,6 +44,18 @@ playback_fps_gauge = Gauge(
     ["stream_id"]
 )
 
+stream_fps = Gauge(
+    "stream_fps",
+    "Current FPS per stream",
+    ["stream_id"]
+)
+
+stream_latency = Gauge(
+    "stream_latency",
+    "Current latency per stream (ms)",
+    ["stream_id"]
+)
+
 
 def get_metrics() -> tuple[bytes, int, dict[str, str]]:
     """Generate Prometheus metrics in text format.

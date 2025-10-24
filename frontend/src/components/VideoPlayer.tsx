@@ -13,7 +13,6 @@
  * - Loading skeleton during stream initialization
  * - Error states: unavailable, unsupported codec, network error
  * - Fullscreen toggle using Fullscreen API
- * - Mute/unmute toggle
  * - Responsive aspect ratio (16:9)
  * - Graceful error recovery with retry capability
  * 
@@ -37,7 +36,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { AlertCircle, Maximize2, MoreVertical, Volume2, VolumeX } from 'lucide-react'
+import { AlertCircle, Maximize2, MoreVertical } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 
 interface VideoPlayerProps {
@@ -48,100 +47,47 @@ interface VideoPlayerProps {
 type PlayerError = 'unavailable' | 'unsupported' | 'network' | null
 
 export default function VideoPlayer({ streamId, rtspUrl: _rtspUrl }: VideoPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null)
+  const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<PlayerError>(null)
-  const [isMuted, setIsMuted] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
 
   // Construct MJPEG stream URL from RTSP URL
   // Backend serves MJPEG at /api/streams/play/{id}.mjpg
-  const mjpegUrl = `/api/streams/play/${streamId}.mjpg`
+  const mjpegUrl = `/api/streams/${streamId}/mjpeg`
 
   useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
+    const img = imgRef.current
+    if (!img) return
 
     // Reset state
     setIsLoading(true)
     setError(null)
 
-    // Set video source
-    video.src = mjpegUrl
+    // Set image source
+    img.src = mjpegUrl + '?t=' + Date.now()  // Cache bust
 
-    // Handle video events
-    const handleLoadStart = () => {
-      setIsLoading(true)
-      setError(null)
-    }
-
-    const handleCanPlay = () => {
+    const handleLoad = () => {
       setIsLoading(false)
       setError(null)
     }
 
     const handleError = () => {
       setIsLoading(false)
-      // Determine error type based on video error code
-      if (video.error) {
-        switch (video.error.code) {
-          case video.error.MEDIA_ERR_ABORTED:
-            setError('network')
-            break
-          case video.error.MEDIA_ERR_NETWORK:
-            setError('network')
-            break
-          case video.error.MEDIA_ERR_DECODE:
-            setError('unsupported')
-            break
-          case video.error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-            setError('unsupported')
-            break
-          default:
-            setError('unavailable')
-        }
-      } else {
-        setError('unavailable')
-      }
+      setError('unavailable')
     }
 
-    const handleStalled = () => {
-      setError('network')
-    }
-
-    const handleSuspend = () => {
-      // Stream suspended, likely network issue
-      if (isLoading) {
-        setError('network')
-      }
-    }
-
-    // Add event listeners
-    video.addEventListener('loadstart', handleLoadStart)
-    video.addEventListener('canplay', handleCanPlay)
-    video.addEventListener('error', handleError)
-    video.addEventListener('stalled', handleStalled)
-    video.addEventListener('suspend', handleSuspend)
-
-    // Attempt to load and play
-    video.load()
-    video.play().catch(() => {
-      // Autoplay may be blocked, that's okay
-      setIsLoading(false)
-    })
+    img.addEventListener('load', handleLoad)
+    img.addEventListener('error', handleError)
 
     // Cleanup
     return () => {
-      video.removeEventListener('loadstart', handleLoadStart)
-      video.removeEventListener('canplay', handleCanPlay)
-      video.removeEventListener('error', handleError)
-      video.removeEventListener('stalled', handleStalled)
-      video.removeEventListener('suspend', handleSuspend)
-      video.pause()
-      video.src = ''
+      img.removeEventListener('load', handleLoad)
+      img.removeEventListener('error', handleError)
+      img.src = ''
     }
-  }, [mjpegUrl, streamId, isLoading])
+  }, [mjpegUrl, streamId])
 
   const handleFullscreen = async () => {
     if (!containerRef.current) return
@@ -163,21 +109,13 @@ export default function VideoPlayer({ streamId, rtspUrl: _rtspUrl }: VideoPlayer
     }
   }
 
-  const handleToggleMute = () => {
-    if (videoRef.current) {
-      videoRef.current.muted = !isMuted
-      setIsMuted(!isMuted)
-    }
-  }
-
   const handleRetry = () => {
-    if (videoRef.current) {
+    if (imgRef.current) {
       setIsLoading(true)
       setError(null)
-      videoRef.current.load()
-      videoRef.current.play().catch(() => {
-        setIsLoading(false)
-      })
+      imgRef.current.src = mjpegUrl + '?t=' + Date.now()  // Cache bust
+      imgRef.current.onload = () => setIsLoading(false)
+      imgRef.current.onerror = () => setError('unavailable')
     }
   }
 
@@ -214,31 +152,17 @@ export default function VideoPlayer({ streamId, rtspUrl: _rtspUrl }: VideoPlayer
           </div>
         )}
 
-        <video
-          ref={videoRef}
+        <img
+          ref={imgRef}
           className="w-full h-full object-contain"
-          controls={false}
-          autoPlay
-          muted={isMuted}
+          alt="Live stream"
         />
 
         {/* Video controls overlay */}
         <div className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/80 to-transparent p-4 opacity-0 hover:opacity-100 transition-opacity">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={handleToggleMute}
-                className="text-white hover:bg-white/20"
-                title={isMuted ? 'Unmute' : 'Mute'}
-              >
-                {isMuted ? (
-                  <VolumeX className="h-4 w-4" />
-                ) : (
-                  <Volume2 className="h-4 w-4" />
-                )}
-              </Button>
+              {/* Removed mute button as MJPEG has no audio */}
             </div>
 
             <div className="flex items-center gap-2">

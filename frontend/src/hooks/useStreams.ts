@@ -48,6 +48,23 @@ export function useStreams(options: UseStreamsOptions = {}): UseStreamsReturn {
     }
   }, [])
 
+  // Add scores state
+  const [scores, setScores] = useState<Record<string, any>>({})
+
+  useEffect(() => {
+    streams.forEach(s => {
+      if (s.status === 'running' && !scores[s.id]) {
+        const eventSource = new EventSource(`/api/streams/${s.id}/scores`)
+        eventSource.onmessage = (event) => {
+          const data = JSON.parse(event.data)
+          setScores(prev => ({...prev, [s.id]: data}))
+        }
+        eventSource.onerror = () => eventSource.close()
+      }
+    })
+  }, [streams])
+
+
   const createStream = useCallback(async (data: NewStreamRequest): Promise<StreamResponse> => {
     try {
       setError(null)

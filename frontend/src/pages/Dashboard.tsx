@@ -6,7 +6,7 @@
  * Status updates every 2 seconds with visual feedback (green/yellow/red)
  */
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Layout from '@/components/Layout'
 import StreamCard from '@/components/StreamCard'
 import EmptyState from '@/components/EmptyState'
@@ -16,6 +16,7 @@ import { AlertCircle } from 'lucide-react'
 
 export default function Dashboard() {
   const { streams, isLoading, error, refetch } = useStreams({ autoFetch: true, pollInterval: 2000 })
+  const [metrics, setMetrics] = useState({})
 
   useEffect(() => {
     // Set up polling for real-time status updates every 2 seconds
@@ -25,6 +26,27 @@ export default function Dashboard() {
 
     return () => clearInterval(pollInterval)
   }, [refetch])
+
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      try {
+        const res = await fetch('/api/metrics')
+        const data = await res.text()  // Prometheus text
+        // Parse simple gauges, e.g., stream_fps{stream_id="id"} 5
+        const fpsMap = {}
+        data.split('\n').forEach(line => {
+          if (line.includes('stream_fps{stream_id="') ) {
+            const match = line.match(/stream_fps\{stream_id="([^"]+)"\}\s+(\d+\.?\d*)/)
+            if (match) fpsMap[match[1]] = parseFloat(match[2])
+          }
+        })
+        setMetrics(fpsMap)
+      } catch {}
+    }
+    fetchMetrics()
+    const interval = setInterval(fetchMetrics, 5000)
+    return () => clearInterval(interval)
+  }, [])
 
   const handleRetry = () => {
     refetch()
@@ -81,7 +103,7 @@ export default function Dashboard() {
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-max">
                 {streams.map(stream => (
-                  <StreamCard key={stream.id} stream={stream} />
+                  <StreamCard key={stream.id} stream={stream} fps={metrics[stream.id]} />
                 ))}
               </div>
             </div>

@@ -26,6 +26,9 @@ import { Button } from '@/components/ui/button'
 import { Edit2, Play, Trash2, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
 import type { StreamResponse } from '@/lib/types'
 import { truncateText, maskRtspUrl } from '@/lib/utils'
+import { useState, useEffect } from 'react'
+import VideoPlayer from './VideoPlayer'
+import { EventSourcePolyfill } from 'event-source-polyfill'  // If needed, or native EventSource
 
 interface StreamCardProps {
   stream: StreamResponse
@@ -71,6 +74,22 @@ export default function StreamCard({ stream }: StreamCardProps) {
   const displayUrl =
     maskedUrl.length > 20 ? '...' + maskedUrl.slice(-20) : maskedUrl
 
+  const [scores, setScores] = useState({distance: 0, coordinates: {x:0,y:0}, size: 0})
+  const [sse, setSse] = useState<EventSource | null>(null)
+
+  useEffect(() => {
+    if (stream.status === 'running') {
+      const eventSource = new EventSource(`/api/streams/${stream.id}/scores`)
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data)
+        setScores(data)
+      }
+      eventSource.onerror = () => eventSource.close()
+      setSse(eventSource)
+    }
+    return () => sse?.close()
+  }, [stream.id, stream.status])
+
   return (
     <Card className="flex flex-col h-full hover:shadow-md transition-shadow">
       <CardHeader className="pb-3">
@@ -100,6 +119,18 @@ export default function StreamCard({ stream }: StreamCardProps) {
               {new Date(stream.created_at).toLocaleDateString()}
             </span>
           </div>
+        </div>
+
+        {/* Video Player and Scores Overlay */}
+        <div className="relative">
+          <VideoPlayer streamId={stream.id} rtspUrl={stream.rtsp_url} className="w-full h-32 object-cover rounded" />
+          {scores && (
+            <div className="absolute inset-0 bg-black/30 flex items-center justify-center rounded">
+              <div className="text-white text-xs bg-black/50 px-2 py-1 rounded">
+                Dist: {scores.distance.toFixed(2)} | Pos: ({scores.coordinates.x.toFixed(2)}, {scores.coordinates.y.toFixed(2)}) | Size: {scores.size}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Action Buttons */}

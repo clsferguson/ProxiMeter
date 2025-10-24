@@ -1,14 +1,18 @@
 """REST API endpoints for stream management."""
 from fastapi import APIRouter, HTTPException, status, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from typing import List
 import logging
 from threading import Lock
+import asyncio
+import json
+import random
 
 from ..models.stream import NewStream, Stream
 from ..services.streams_service import StreamsService
 from ..utils.rtsp import generate_mjpeg_stream
 from ..utils.strings import mask_rtsp_credentials
+from ..metrics import generate_latest, CONTENT_TYPE_LATEST
 
 logger = logging.getLogger(__name__)
 
@@ -368,3 +372,41 @@ async def stop_stream(
     except Exception as e:
         logger.error(f"Error stopping stream {stream_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/{stream_id}/scores")
+async def scores_sse(
+    stream_id: str,
+    service: StreamsService = Depends(get_streams_service)
+):
+    """SSE endpoint for real-time scores at 5 FPS."""
+    stream = await service.get_stream(stream_id)
+    if not stream or stream["status"] != "running":
+        raise HTTPException(400, "Stream not running")
+    
+    async def event_generator():
+        while True:
+            ret, frame = await service.get_frame(stream_id)
+            if not ret:
+                break
+            
+            # Dummy scoring (replace with YOLO + Shapely)
+            distance = random.uniform(0, 1)
+            coords = {"x": random.uniform(0, 1), "y": random.uniform(0, 1)}
+            size = random.randint(50, 200)
+            
+            score = {"distance": distance, "coordinates": coords, "size": size, "timestamp": datetime.utcnow().isoformat()}
+            yield f"data: {json.dumps(score)}\n\n"
+            await asyncio.sleep(0.2)  # 5 FPS
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    )
+
+
+@router.get("/metrics")
+async def metrics():
+    body, status, headers = generate_latest()
+    return Response(content=body, status_code=status, headers=headers)

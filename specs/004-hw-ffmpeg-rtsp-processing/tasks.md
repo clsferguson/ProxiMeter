@@ -66,12 +66,12 @@ As a user, view live processed stream with scores overlaid, ensuring smooth play
 
 **Implementation Tasks**:
 
-- [ ] T017 [P] [US2] Update VideoPlayer.tsx to use <img src={`/streams/${streamId}/mjpeg`} /> for MJPEG display in frontend/src/components/VideoPlayer.tsx
-- [ ] T018 [US2] Enhance StreamCard.tsx to overlay SSE scores (distance, coordinates, size) on video using absolute positioning in frontend/src/components/StreamCard.tsx
-- [ ] T019 [P] [US2] Implement GET /streams/{id}/scores SSE endpoint to stream JSON scores at 5 FPS (using existing scoring pipeline) in src/app/api/streams.py
-- [ ] T020 [US2] Update useStreams.ts hook to subscribe to SSE scores and update UI state in frontend/src/hooks/useStreams.ts
-- [ ] T021 [P] [US2] Add metrics display (FPS, latency) in Dashboard.tsx by fetching /metrics in frontend/src/pages/Dashboard.tsx
-- [ ] T022 [US2] Update PlayStream.tsx to render VideoPlayer with scores overlay for single stream view in frontend/src/pages/PlayStream.tsx
+- [X] T017 [P] [US2] Update VideoPlayer.tsx to use <img src={`/streams/${streamId}/mjpeg`} /> for MJPEG display in frontend/src/components/VideoPlayer.tsx
+- [X] T018 [US2] Enhance StreamCard.tsx to overlay SSE scores (distance, coordinates, size) on video using absolute positioning in frontend/src/components/StreamCard.tsx
+- [X] T019 [P] [US2] Implement GET /streams/{id}/scores SSE endpoint to stream JSON scores at 5 FPS (using existing scoring pipeline) in src/app/api/streams.py
+- [X] T020 [US2] Update useStreams.ts hook to subscribe to SSE scores and update UI state in frontend/src/hooks/useStreams.ts
+- [X] T021 [P] [US2] Add metrics display (FPS, latency) in Dashboard.tsx by fetching /metrics in frontend/src/pages/Dashboard.tsx
+- [X] T022 [US2] Update PlayStream.tsx to render VideoPlayer with scores overlay for single stream view in frontend/src/pages/PlayStream.tsx
 
 ### Phase 5: Polish & Cross-Cutting Concerns
 Integration, error handling, docs, and observability. No user stories.

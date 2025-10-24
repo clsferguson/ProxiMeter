@@ -21,6 +21,7 @@ export default function PlayStream() {
   const navigate = useNavigate()
   const { streams, isLoading, error } = useStreams()
   const [stream, setStream] = useState<StreamResponse | null>(null)
+  const [scores, setScores] = useState<Record<string, any>>({})
 
   useEffect(() => {
     if (streams.length > 0) {
@@ -28,6 +29,18 @@ export default function PlayStream() {
       setStream(found || null)
     }
   }, [streamId, streams])
+
+  useEffect(() => {
+    if (stream?.status === 'running') {
+      const eventSource = new EventSource(`/api/streams/${stream.id}/scores`)
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data)
+        setScores(prev => ({...prev, [stream.id]: data}))
+      }
+      eventSource.onerror = () => eventSource.close()
+      // Cleanup in return
+    }
+  }, [stream?.id, stream?.status])
 
   if (isLoading) {
     return (
@@ -128,9 +141,16 @@ export default function PlayStream() {
           </div>
         </div>
 
-        {/* Video player */}
-        <div className="bg-black rounded-lg overflow-hidden">
+        {/* Video player with scores overlay */}
+        <div className="relative bg-black rounded-lg overflow-hidden">
           <VideoPlayer streamId={stream.id} rtspUrl={stream.rtsp_url} />
+          {scores[stream.id] && (
+            <div className="absolute bottom-4 left-4 right-4 bg-black/50 text-white p-2 rounded text-sm">
+              Dist: {scores[stream.id].distance.toFixed(2)} | 
+              Pos: ({scores[stream.id].coordinates.x.toFixed(2)}, {scores[stream.id].coordinates.y.toFixed(2)}) | 
+              Size: {scores[stream.id].size}
+            </div>
+          )}
         </div>
 
         {/* Stream info */}
