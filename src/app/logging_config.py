@@ -28,6 +28,17 @@ def redact_credentials(message: str) -> str:
     """
     return RTSP_CREDENTIAL_PATTERN.sub(r'rtsp://***:***@', message)
 
+def log_ffmpeg_stderr(stream_id: str, stderr_data: bytes):
+    """Log FFmpeg stderr output."""
+    try:
+        message = stderr_data.decode('utf-8', errors='ignore').strip()
+        if message:
+            logger = logging.getLogger(f"ffmpeg.{stream_id}")
+            logger.warning(f"FFmpeg stderr: {redact_credentials(message)}")
+    except Exception:
+        logging.getLogger("ffmpeg").error(f"Failed to log FFmpeg stderr for {stream_id}")
+
+
 
 class JSONFormatter(logging.Formatter):
     """Format log records as newline-delimited JSON with credential redaction."""

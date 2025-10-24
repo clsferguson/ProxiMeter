@@ -1,0 +1,1 @@
+# In zones.py, add router = APIRouter() and include in main.py as app.include_router(zones.router)

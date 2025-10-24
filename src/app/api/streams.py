@@ -8,9 +8,16 @@ import asyncio
 import json
 import random
 
-from ..models.stream import NewStream, Stream
+from ..models.stream import NewStream, Stream, EditStream
+from ..models.zone import Zone, NewZone, EditZone
 from ..services.streams_service import StreamsService
+from ..services.zones_service import ZonesService
 from ..utils.rtsp import generate_mjpeg_stream
+import cv2
+import asyncio
+import json
+import random
+from datetime import datetime
 from ..utils.strings import mask_rtsp_credentials
 from ..metrics import generate_latest, CONTENT_TYPE_LATEST
 
@@ -269,7 +276,7 @@ async def mjpeg_stream(
     
     async def generate_frames():
         while True:
-            ret, frame = await service.get_frame(stream_id)  # Make get_frame async if needed
+            ret, frame = service.get_frame(stream_id)  # Sync call
             if not ret:
                 yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + b''  # Empty frame or break
                 break
@@ -285,6 +292,7 @@ async def mjpeg_stream(
                 continue
             
             yield b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + str(len(jpeg)).encode() + b'\r\n\r\n' + jpeg.tobytes() + b'\r\n'
+            await asyncio.sleep(1 / fps)
     
     return StreamingResponse(
         generate_frames(),
@@ -295,6 +303,44 @@ async def mjpeg_stream(
             "Expires": "0"
         }
     )
+
+@router.get("/{stream_id}/scores")
+async def scores_sse(
+    stream_id: str,
+    service: StreamsService = Depends(get_streams_service)
+):
+    """SSE endpoint for real-time scores at 5 FPS."""
+    stream = await service.get_stream(stream_id)
+    if not stream or stream["status"] != "running":
+        raise HTTPException(400, "Stream not running")
+    
+    async def event_generator():
+        while True:
+            ret, frame = service.get_frame(stream_id)
+            if not ret:
+                break
+            
+            # Dummy scoring (replace with YOLO + Shapely)
+            distance = random.uniform(0, 1)
+            coords = {"x": random.uniform(0, 1), "y": random.uniform(0, 1)}
+            size = random.randint(50, 200)
+            
+            score = {"distance": distance, "coordinates": coords, "size": size, "timestamp": datetime.utcnow().isoformat()}
+            yield f"data: {json.dumps(score)}\n\n"
+            await asyncio.sleep(0.2)  # 5 FPS
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    )
+
+@router.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint."""
+    from ..metrics import generate_latest, CONTENT_TYPE_LATEST
+    body, status, headers = generate_latest()
+    return Response(content=body, media_type=CONTENT_TYPE_LATEST)
 
 
 @router.get("/gpu-backend")

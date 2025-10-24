@@ -54,6 +54,26 @@ curl http://localhost:8000/metrics
 docker compose down
 ```
 
+### FFmpeg Configuration
+
+ProxiMeter uses FFmpeg for RTSP stream processing with hardware acceleration support.
+
+**GPU Acceleration**:
+- **NVIDIA**: Requires NVIDIA drivers + CUDA. Docker: `--gpus all`. Env: `GPU_BACKEND=nvidia`.
+- **AMD**: Requires ROCm. Env: `GPU_BACKEND=amd`.
+- **Intel**: Requires oneAPI. Env: `GPU_BACKEND=intel`.
+- Detection: `entrypoint.sh` sets `GPU_BACKEND_DETECTED` (nvidia/amd/intel/none).
+
+**Custom FFmpeg Params**:
+- In UI: Textarea for flags (e.g., `-rtsp_transport tcp -timeout 10000000`).
+- Defaults: `-hide_banner -loglevel warning -threads 2 -rtsp_transport tcp -timeout 10000000` + GPU flags.
+- Validation: Whitelists safe flags; rejects shell metachars (`; & | > <`); probes with `ffprobe` on save.
+
+**Troubleshooting FFmpeg**:
+- Logs: Check container logs for FFmpeg stderr (`docker logs proximeter`).
+- Test: `docker exec -it proximeter ffmpeg -version`.
+- GPU: `docker exec -it proximeter nvidia-smi` (NVIDIA).
+
 ### Custom Port
 
 If port 8000 is in use, set the `APP_PORT` environment variable:

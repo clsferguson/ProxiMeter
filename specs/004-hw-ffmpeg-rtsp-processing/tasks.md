@@ -76,13 +76,13 @@ As a user, view live processed stream with scores overlaid, ensuring smooth play
 ### Phase 5: Polish & Cross-Cutting Concerns
 Integration, error handling, docs, and observability. No user stories.
 
-- [ ] T023 Update /health to include stream statuses and accel mode (cuda/software) in src/app/api/health.py
-- [ ] T024 [P] Implement /metrics Prometheus endpoint with stream_fps, latency, error_rate gauges in src/app/metrics.py
-- [ ] T025 Add error responses (400/404/503 with JSON {error, code}) to all endpoints per openapi in src/app/api/errors.py
-- [ ] T026 [P] Update zones endpoints to handle normalized points (0-1) scaling in backend during processing in src/app/api/zones.py
-- [ ] T027 Enhance logging for FFmpeg stderr and subprocess errors in src/app/logging_config.py
-- [ ] T028 Update README.md and QUICK_START.md with FFmpeg config instructions in root README.md and QUICK_START.md
-- [ ] T029 Validate openapi.yaml against implemented endpoints using existing tools
+- [X] T023 Update /health to include stream statuses and accel mode (cuda/software) in src/app/api/health.py
+- [X] T024 [P] Implement /metrics Prometheus endpoint with stream_fps, latency, error_rate gauges in src/app/metrics.py
+- [X] T025 Add error responses (400/404/503 with JSON {error, code}) to all endpoints per openapi in src/app/api/errors.py
+- [X] T026 [P] Update zones endpoints to handle normalized points (0-1) scaling in backend during processing in src/app/api/zones.py
+- [X] T027 Enhance logging for FFmpeg stderr and subprocess errors in src/app/logging_config.py
+- [X] T028 Update README.md and QUICK_START.md with FFmpeg config instructions in root README.md and QUICK_START.md
+- [X] T029 Validate openapi.yaml against implemented endpoints using existing tools
 
 ## Dependencies
 

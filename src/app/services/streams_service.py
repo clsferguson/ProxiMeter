@@ -346,6 +346,18 @@ class StreamsService:
                 universal_newlines=False  # Binary for OpenCV
             )
             
+            # Log stderr in background
+            async def log_stderr():
+                loop = asyncio.get_event_loop()
+                while True:
+                    line = await loop.run_in_executor(None, process.stderr.readline)
+                    if not line:
+                        break
+                    from ..logging_config import log_ffmpeg_stderr
+                    log_ffmpeg_stderr(stream_id, line)
+            
+            asyncio.create_task(log_stderr())
+            
             if process.stdout is None:
                 raise RuntimeError("FFmpeg stdout pipe not available")
             
