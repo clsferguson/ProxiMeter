@@ -10,9 +10,12 @@ export interface StreamResponse {
   id: string;
   name: string;
   rtsp_url: string;
+  hw_accel_enabled: boolean;
+  ffmpeg_params: string[];
+  target_fps: number;
   created_at: string;
   order: number;
-  status: 'Active' | 'Inactive';
+  status: 'Active' | 'Inactive' | 'running' | 'stopped' | 'error' | 'starting' | 'disconnected';
 }
 
 /**
@@ -21,6 +24,9 @@ export interface StreamResponse {
 export interface NewStreamRequest {
   name: string;
   rtsp_url: string;
+  hw_accel_enabled?: boolean;
+  ffmpeg_params?: string[];
+  target_fps?: number;
 }
 
 /**
@@ -30,6 +36,9 @@ export interface NewStreamRequest {
 export interface EditStreamRequest {
   name?: string;
   rtsp_url?: string;
+  hw_accel_enabled?: boolean;
+  ffmpeg_params?: string[];
+  target_fps?: number;
 }
 
 /**

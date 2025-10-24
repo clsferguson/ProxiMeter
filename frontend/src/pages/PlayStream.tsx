@@ -16,12 +16,19 @@ import { AlertCircle, ArrowLeft } from 'lucide-react'
 import { useStreams } from '@/hooks/useStreams'
 import type { StreamResponse } from '@/lib/types'
 
+interface ScoreData {
+  timestamp: string
+  distance: number
+  coordinates: { x: number; y: number }
+  size: number
+}
+
 export default function PlayStream() {
   const { streamId } = useParams<{ streamId: string }>()
   const navigate = useNavigate()
   const { streams, isLoading, error } = useStreams()
   const [stream, setStream] = useState<StreamResponse | null>(null)
-  const [scores, setScores] = useState<Record<string, any>>({})
+  const [scores, setScores] = useState<Record<string, ScoreData>>({})
 
   useEffect(() => {
     if (streams.length > 0) {
@@ -31,14 +38,14 @@ export default function PlayStream() {
   }, [streamId, streams])
 
   useEffect(() => {
-    if (stream?.status === 'running') {
+    if (stream?.status === 'running' || stream?.status === 'Active') {
       const eventSource = new EventSource(`/api/streams/${stream.id}/scores`)
       eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data)
+        const data = JSON.parse(event.data) as ScoreData
         setScores(prev => ({...prev, [stream.id]: data}))
       }
       eventSource.onerror = () => eventSource.close()
-      // Cleanup in return
+      return () => eventSource.close()
     }
   }, [stream?.id, stream?.status])
 

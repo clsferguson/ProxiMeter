@@ -16,7 +16,7 @@ import { AlertCircle } from 'lucide-react'
 
 export default function Dashboard() {
   const { streams, isLoading, error, refetch } = useStreams({ autoFetch: true, pollInterval: 2000 })
-  const [metrics, setMetrics] = useState({})
+  const [metrics, setMetrics] = useState<Record<string, number>>({})
 
   useEffect(() => {
     // Set up polling for real-time status updates every 2 seconds
@@ -33,7 +33,7 @@ export default function Dashboard() {
         const res = await fetch('/api/metrics')
         const data = await res.text()  // Prometheus text
         // Parse simple gauges, e.g., stream_fps{stream_id="id"} 5
-        const fpsMap = {}
+        const fpsMap: Record<string, number> = {}
         data.split('\n').forEach(line => {
           if (line.includes('stream_fps{stream_id="') ) {
             const match = line.match(/stream_fps\{stream_id="([^"]+)"\}\s+(\d+\.?\d*)/)
@@ -41,7 +41,9 @@ export default function Dashboard() {
           }
         })
         setMetrics(fpsMap)
-      } catch {}
+      } catch (err) {
+        console.error('Failed to fetch metrics:', err)
+      }
     }
     fetchMetrics()
     const interval = setInterval(fetchMetrics, 5000)
@@ -103,7 +105,7 @@ export default function Dashboard() {
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-max">
                 {streams.map(stream => (
-                  <StreamCard key={stream.id} stream={stream} fps={metrics[stream.id]} />
+                  <StreamCard key={stream.id} stream={stream} />
                 ))}
               </div>
             </div>

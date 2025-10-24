@@ -75,7 +75,7 @@ const streamFormSchema = z.object({
       `Invalid RTSP URL format. Expected ${VALIDATION.RTSP_URL_PREFIX}...`
     ),
   hw_accel_enabled: z.boolean().default(true),
-  ffmpeg_params: z.string().optional().transform(val => val ? val.split(' ').filter(Boolean) : []),
+  ffmpeg_params: z.string().default(''),
   target_fps: z.coerce.number().min(1).max(30).default(5),
 })
 
@@ -151,7 +151,12 @@ export function StreamForm({
   const handleSubmit = async (data: StreamFormData) => {
     try {
       setSubmitError(null)
-      await onSubmit(data)
+      // Transform ffmpeg_params string to array
+      const transformedData = {
+        ...data,
+        ffmpeg_params: data.ffmpeg_params ? data.ffmpeg_params.split(' ').filter(Boolean) : []
+      }
+      await onSubmit(transformedData as any)
       // Navigation happens in parent component after successful submission
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save stream'

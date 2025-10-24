@@ -151,26 +151,70 @@ async def probe_rtsp_stream(rtsp_url: str, timeout_seconds: float = 2.0) -> bool
         return False
 
 
-def probe_rtsp_stream(rtsp_url: str, timeout_seconds: float = 2.0) -> bool:
-    """Probe RTSP stream reachability using ffprobe.
+def build_ffmpeg_command(
+    rtsp_url: str,
+    ffmpeg_params: list[str],
+    target_fps: int,
+    gpu_backend: Optional[str] = None
+) -> list[str]:
+    """Build FFmpeg command with GPU acceleration flags if enabled.
     
     Args:
-        rtsp_url: RTSP URL to probe
-        timeout_seconds: Probe timeout
+        rtsp_url: RTSP URL to decode
+        ffmpeg_params: User-provided FFmpeg parameters
+        target_fps: Target frames per second
+        gpu_backend: GPU backend (nvidia, amd, intel, or None for software)
         
     Returns:
-        True if stream is reachable
+        List of command arguments for subprocess
     """
-    from subprocess import run, PIPE, timeout
-    cmd = [
-        "ffprobe",
-        "-hide_banner",
-        "-loglevel", "error",
-        "-timeout", str(int(timeout_seconds * 1e6)),  # microseconds
-        "-i", rtsp_url
-    ]
-    try:
-        result = run(cmd, stdout=PIPE, stderr=PIPE, timeout=timeout_seconds)
-        return result.returncode == 0
-    except subprocess.TimeoutExpired:
+    cmd = ["ffmpeg"]
+    
+    # Add user params first
+    cmd.extend(ffmpeg_params)
+    
+    # Add input
+    cmd.extend(["-i", rtsp_url])
+    
+    # Add output format (MJPEG for HTTP streaming)
+    cmd.extend([
+        "-c:v", "mjpeg",
+        "-q:v", "8",  # Quality (1-31, lower is better)
+        "-f", "mjpeg",
+        "-"  # Output to stdout
+    ])
+    
+    return cmd
+
+
+def validate_rtsp_url(url: str, params: list[str], gpu_backend: str) -> bool:
+    """Validate RTSP URL and FFmpeg params compatibility.
+    
+    Args:
+        url: RTSP URL to validate
+        params: FFmpeg parameters to validate
+        gpu_backend: Detected GPU backend (nvidia, amd, intel, none)
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    # Check URL format
+    if not url or not url.lower().startswith("rtsp://"):
         return False
+    
+    # Check for invalid shell characters in params
+    forbidden = [";", "&", "|", ">", "<", "`", "$"]
+    for param in params:
+        if any(f in param for f in forbidden):
+            logger.warning(f"Invalid FFmpeg param contains shell metachar: {param}")
+            return False
+    
+    # Check GPU-specific params if GPU backend is none
+    if gpu_backend == "none":
+        gpu_flags = ["-hwaccel", "-hwaccel_output_format", "-c:v"]
+        for param in params:
+            if any(flag in param for flag in gpu_flags):
+                logger.warning(f"GPU param {param} used but no GPU detected")
+                return False
+    
+    return True

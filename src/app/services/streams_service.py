@@ -5,14 +5,14 @@ from datetime import datetime
 import uuid
 import subprocess
 import os
+import asyncio
 import cv2
-import numpy as np  # For frame typing if needed
 
 from ..config_io import load_streams, save_streams
 from ..models.stream import Stream, NewStream
-from ..utils.validation import validate_rtsp_url
+from ..utils.validation import validate_rtsp_url as validate_rtsp_url_format
 from ..utils.strings import normalize_stream_name
-from ..utils.rtsp import probe_rtsp_stream, build_ffmpeg_command, validate_rtsp_url, build_ffmpeg_command, validate_rtsp_url
+from ..utils.rtsp import probe_rtsp_stream, build_ffmpeg_command, validate_rtsp_url
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class StreamsService:
         return streams
     
     async def create_stream(self, name: str, rtsp_url: str, hw_accel_enabled: bool = True,
-                        ffmpeg_params: list[str] = None, target_fps: int = 5) -> dict:
+                        ffmpeg_params: Optional[list[str]] = None, target_fps: int = 5) -> dict:
         """Create a new stream with validation.
         
         Args:
@@ -67,7 +67,7 @@ class StreamsService:
             raise ValueError("Name must be 1-50 characters after trimming")
         
         # Validate RTSP URL format
-        is_valid, error_msg = validate_rtsp_url(rtsp_url)
+        is_valid, error_msg = validate_rtsp_url_format(rtsp_url)
         if not is_valid:
             raise ValueError(error_msg)
         
@@ -175,15 +175,13 @@ class StreamsService:
         if rtsp_url is not None:
             rtsp_url = rtsp_url.strip()
             
-            # Validate RTSP URL format
-            is_valid, error_msg = validate_rtsp_url(rtsp_url)
-            if not is_valid:
-                raise ValueError(error_msg)
-            
-            stream["rtsp_url"] = rtsp_url
-            url_changed = True
+        # Validate RTSP URL format
+        is_valid, error_msg = validate_rtsp_url_format(rtsp_url)
+        if not is_valid:
+            raise ValueError(error_msg)
         
-        if hw_accel_enabled is not None:
+        stream["rtsp_url"] = rtsp_url
+        url_changed = True        if hw_accel_enabled is not None:
             stream["hw_accel_enabled"] = hw_accel_enabled
 
         if ffmpeg_params is not None:
@@ -349,6 +347,8 @@ class StreamsService:
             # Log stderr in background
             async def log_stderr():
                 loop = asyncio.get_event_loop()
+                if process.stderr is None:
+                    return
                 while True:
                     line = await loop.run_in_executor(None, process.stderr.readline)
                     if not line:
@@ -427,7 +427,7 @@ class StreamsService:
         logger.info(f"Stopped stream {stream_id}")
         return True
     
-    async def get_frame(self, stream_id: str) -> tuple[bool, cv2.Mat | None]:
+    async def get_frame(self, stream_id: str) -> Tuple[bool, Optional[Any]]:
         """Get next frame from stream pipe.
         
         Returns:
@@ -440,5 +440,26 @@ class StreamsService:
         ret, frame = cap.read()
         return ret, frame  # frame is np.ndarray
     
-    # Update create_stream and update_stream to call start/stop if needed, but defer to API layer
-    # For now, assume API calls start after create/update validation
+    def default_ffmpeg_params(self) -> list[str]:
+        """Get default FFmpeg params with GPU flags if available.
+        
+        Returns:
+            List of default FFmpeg parameters
+        """
+        params = [
+            "-hide_banner",
+            "-loglevel", "warning",
+            "-threads", "2",
+            "-rtsp_transport", "tcp",
+            "-timeout", "10000000"
+        ]
+        
+        # Add GPU-specific flags if available
+        if self.gpu_backend == "nvidia":
+            params.extend(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-c:v", "h264_cuvid"])
+        elif self.gpu_backend == "amd":
+            params.extend(["-hwaccel", "amf", "-c:v", "h264_amf"])
+        elif self.gpu_backend == "intel":
+            params.extend(["-hwaccel", "qsv", "-c:v", "h264_qsv"])
+        
+        return params
