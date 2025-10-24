@@ -17,6 +17,7 @@ import { useStreams } from '@/hooks/useStreams'
 interface StreamFormData {
   name: string
   rtsp_url: string
+  ffmpeg_params?: string | string[]
 }
 
 export default function AddStream() {

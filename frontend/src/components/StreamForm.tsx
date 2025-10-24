@@ -74,9 +74,9 @@ const streamFormSchema = z.object({
       (url) => url.startsWith(VALIDATION.RTSP_URL_PREFIX),
       `Invalid RTSP URL format. Expected ${VALIDATION.RTSP_URL_PREFIX}...`
     ),
-  hw_accel_enabled: z.boolean().default(true),
-  ffmpeg_params: z.string().default(''),
-  target_fps: z.coerce.number().min(1).max(30).default(5),
+  hw_accel_enabled: z.boolean(),
+  ffmpeg_params: z.string(),
+  target_fps: z.number().min(1).max(30),
 })
 
 type StreamFormData = z.infer<typeof streamFormSchema>
@@ -122,10 +122,10 @@ export function StreamForm({
   const form = useForm<StreamFormData>({
     resolver: zodResolver(streamFormSchema),
     defaultValues: {
-      name: initialValues?.name || '',
-      rtsp_url: initialValues?.rtsp_url || '',
+      name: initialValues?.name ?? '',
+      rtsp_url: initialValues?.rtsp_url ?? '',
       hw_accel_enabled: initialValues?.hw_accel_enabled ?? true,
-      ffmpeg_params: initialValues?.ffmpeg_params?.join(' ') || '',
+      ffmpeg_params: initialValues?.ffmpeg_params?.join(' ') ?? '',
       target_fps: initialValues?.target_fps ?? 5,
     },
     mode: 'onBlur', // Validate on blur for better UX
@@ -253,6 +253,7 @@ export function StreamForm({
                     <Switch
                       checked={field.value}
                       onCheckedChange={field.onChange}
+                      disabled={isLoading}
                     />
                   </FormControl>
                 </FormItem>
@@ -269,6 +270,7 @@ export function StreamForm({
                   <FormControl>
                     <Textarea
                       placeholder={paramsPlaceholder}
+                      disabled={isLoading}
                       {...field}
                     />
                   </FormControl>
@@ -293,7 +295,10 @@ export function StreamForm({
                       min={1}
                       max={30}
                       placeholder="5"
+                      disabled={isLoading}
                       {...field}
+                      onChange={(e) => field.onChange(parseInt(e.target.value) || 5)}
+                      value={field.value}
                     />
                   </FormControl>
                   <FormDescription>

@@ -1,5 +1,8 @@
 """Health check endpoint."""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from src.app.services.streams import StreamsService, get_streams_service
+from src.app.utils.gpu import get_gpu_backend
+from src.app.logger import logger
 
 router = APIRouter(tags=["health"])
 

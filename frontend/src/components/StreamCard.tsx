@@ -28,7 +28,6 @@ import type { StreamResponse } from '@/lib/types'
 import { truncateText, maskRtspUrl } from '@/lib/utils'
 import { useState, useEffect } from 'react'
 import VideoPlayer from './VideoPlayer'
-import { EventSourcePolyfill } from 'event-source-polyfill'  // If needed, or native EventSource
 
 interface StreamCardProps {
   stream: StreamResponse
@@ -74,7 +73,7 @@ export default function StreamCard({ stream }: StreamCardProps) {
   const displayUrl =
     maskedUrl.length > 20 ? '...' + maskedUrl.slice(-20) : maskedUrl
 
-  const [scores, setScores] = useState({distance: 0, coordinates: {x:0,y:0}, size: 0})
+  const [scores, setScores] = useState<{distance: number, coordinates: {x: number, y: number}, size: number} | null>(null)
   const [sse, setSse] = useState<EventSource | null>(null)
 
   useEffect(() => {
@@ -88,7 +87,7 @@ export default function StreamCard({ stream }: StreamCardProps) {
       setSse(eventSource)
     }
     return () => sse?.close()
-  }, [stream.id, stream.status])
+  }, [stream.id, stream.status, sse])
 
   return (
     <Card className="flex flex-col h-full hover:shadow-md transition-shadow">
@@ -122,8 +121,8 @@ export default function StreamCard({ stream }: StreamCardProps) {
         </div>
 
         {/* Video Player and Scores Overlay */}
-        <div className="relative">
-          <VideoPlayer streamId={stream.id} rtspUrl={stream.rtsp_url} className="w-full h-32 object-cover rounded" />
+        <div className="relative w-full aspect-video">
+          <VideoPlayer streamId={stream.id} rtspUrl={stream.rtsp_url} />
           {scores && (
             <div className="absolute inset-0 bg-black/30 flex items-center justify-center rounded">
               <div className="text-white text-xs bg-black/50 px-2 py-1 rounded">
