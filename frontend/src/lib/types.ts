@@ -1,6 +1,9 @@
 /**
  * TypeScript interfaces for ProxiMeter API contracts
  * Based on specs/003-frontend-react-migration/contracts/openapi.yaml
+ * 
+ * Updated: Added auto_start field to stream interfaces for automatic
+ * stream startup functionality.
  */
 
 /**
@@ -13,6 +16,7 @@ export interface StreamResponse {
   hw_accel_enabled: boolean;
   ffmpeg_params: string[];
   target_fps: number;
+  auto_start: boolean;  // NEW: Auto-start on creation/reboot
   created_at: string;
   order: number;
   status: 'Active' | 'Inactive' | 'running' | 'stopped' | 'error' | 'starting' | 'disconnected';
@@ -27,6 +31,7 @@ export interface NewStreamRequest {
   hw_accel_enabled?: boolean;
   ffmpeg_params?: string[];
   target_fps?: number;
+  auto_start?: boolean;  // NEW: Auto-start on creation/reboot (default: true)
 }
 
 /**
@@ -39,6 +44,7 @@ export interface EditStreamRequest {
   hw_accel_enabled?: boolean;
   ffmpeg_params?: string[];
   target_fps?: number;
+  auto_start?: boolean;  // NEW: Update auto-start setting
 }
 
 /**
@@ -78,6 +84,7 @@ export interface ApiError {
 export interface StreamFormData {
   name: string;
   rtsp_url: string;
+  auto_start: boolean;  // NEW: Auto-start toggle in form
 }
 
 /**

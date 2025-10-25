@@ -1,4 +1,21 @@
-"""Stream management service with FFmpeg process control."""
+"""Stream management service with FFmpeg process control.
+
+This service manages the lifecycle of RTSP stream processing:
+- Creating and persisting stream configurations
+- Starting/stopping FFmpeg processes for stream decoding
+- Managing OpenCV VideoCapture instances for frame access
+- Auto-starting streams on application startup
+- Coordinating hardware acceleration (CUDA/NVDEC)
+
+Key features:
+- Automatic stream startup for configured streams
+- Process health monitoring and cleanup
+- Thread-safe frame access
+- Graceful shutdown handling
+
+Updated: Added auto_start support for streams to automatically begin
+processing when configured or when the application restarts.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -25,9 +42,16 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 DEFAULT_PROBE_TIMEOUT: Final[float] = 5.0
+"""Timeout in seconds for probing RTSP stream connectivity."""
+
 STREAM_STOP_TIMEOUT: Final[float] = 5.0
+"""Timeout in seconds for gracefully stopping FFmpeg process."""
+
 MIN_FPS: Final[int] = 1
+"""Minimum allowed target FPS for stream processing."""
+
 MAX_FPS: Final[int] = 30
+"""Maximum allowed target FPS for stream processing."""
 
 
 # ============================================================================
@@ -35,10 +59,22 @@ MAX_FPS: Final[int] = 30
 # ============================================================================
 
 class StreamsService:
-    """Service for managing RTSP streams with FFmpeg processing."""
+    """Service for managing RTSP streams with FFmpeg processing.
+    
+    This service handles the complete lifecycle of stream processing:
+    1. Configuration persistence (JSON file storage)
+    2. FFmpeg subprocess management
+    3. OpenCV VideoCapture coordination
+    4. Frame access for MJPEG and detection
+    5. Auto-start on creation and application startup
+    
+    Attributes:
+        active_processes: Dict mapping stream_id to process info
+        gpu_backend: Detected GPU backend (cuda, none, etc.)
+    """
     
     def __init__(self) -> None:
-        """Initialize streams service."""
+        """Initialize streams service and detect GPU backend."""
         self.active_processes: dict[str, dict[str, Any]] = {}
         self.gpu_backend = get_gpu_backend()
         logger.info(f"StreamsService initialized with GPU backend: {self.gpu_backend}")
@@ -48,7 +84,11 @@ class StreamsService:
     # ========================================================================
     
     async def list_streams(self) -> list[dict]:
-        """List all configured streams sorted by order."""
+        """List all configured streams sorted by display order.
+        
+        Returns:
+            List of stream dicts ordered by 'order' field
+        """
         try:
             config = load_streams()
             streams = config.get("streams", [])
@@ -60,7 +100,14 @@ class StreamsService:
             return []
     
     async def get_stream(self, stream_id: str) -> dict | None:
-        """Get a stream by ID."""
+        """Get a stream by ID.
+        
+        Args:
+            stream_id: UUID of stream to retrieve
+            
+        Returns:
+            Stream dict if found, None otherwise
+        """
         try:
             config = load_streams()
             streams = config.get("streams", [])
@@ -83,9 +130,28 @@ class StreamsService:
         rtsp_url: str,
         hw_accel_enabled: bool = True,
         ffmpeg_params: list[str] | None = None,
-        target_fps: int = 5
+        target_fps: int = 5,
+        auto_start: bool = True
     ) -> dict:
-        """Create a new stream with validation."""
+        """Create a new stream with validation and optional auto-start.
+        
+        Creates stream configuration, validates RTSP connectivity, persists
+        to storage, and optionally starts FFmpeg processing immediately.
+        
+        Args:
+            name: Display name for stream (1-50 characters)
+            rtsp_url: RTSP URL to stream source
+            hw_accel_enabled: Whether to use GPU hardware acceleration
+            ffmpeg_params: Optional additional FFmpeg parameters
+            target_fps: Target frame rate for processing (1-30)
+            auto_start: Whether to automatically start stream on creation
+            
+        Returns:
+            Created stream dict with all fields
+            
+        Raises:
+            ValueError: If validation fails (invalid name, URL, FPS, etc.)
+        """
         # Normalize inputs
         name = name.strip()
         rtsp_url = rtsp_url.strip()
@@ -117,6 +183,9 @@ class StreamsService:
         if not is_reachable:
             logger.warning(f"RTSP URL not reachable: {mask_rtsp_credentials(rtsp_url)}")
         
+        # Determine initial status
+        initial_status = "stopped"
+        
         # Create stream object
         stream = Stream(
             id=str(uuid.uuid4()),
@@ -125,18 +194,26 @@ class StreamsService:
             hw_accel_enabled=hw_accel_enabled,
             ffmpeg_params=ffmpeg_params if ffmpeg_params is not None else [],
             target_fps=target_fps,
+            auto_start=auto_start,
             created_at=datetime.now(timezone.utc).isoformat(),
             order=len(streams),
-            status="stopped"
+            status=initial_status
         )
         
         # Persist
-        streams.append(stream.model_dump())
+        stream_dict = stream.model_dump()
+        streams.append(stream_dict)
         config["streams"] = streams
         save_streams(config)
         
-        logger.info(f"Created stream {stream.id}: {name}")
-        return stream.model_dump()
+        logger.info(f"Created stream {stream.id}: {name} (auto_start={auto_start})")
+        
+        # Auto-start if enabled
+        if auto_start:
+            logger.info(f"Auto-starting stream {stream.id}")
+            asyncio.create_task(self.start_stream(stream.id, stream_dict))
+        
+        return stream_dict
     
     # ========================================================================
     # Stream Updates
@@ -150,9 +227,31 @@ class StreamsService:
         status: str | None = None,
         hw_accel_enabled: bool | None = None,
         ffmpeg_params: list[str] | None = None,
-        target_fps: int | None = None
+        target_fps: int | None = None,
+        auto_start: bool | None = None
     ) -> dict | None:
-        """Update a stream (partial update)."""
+        """Update a stream (partial update).
+        
+        Updates only the fields provided. If RTSP URL changes, re-probes
+        connectivity. If stream is running and critical params change,
+        restart may be required (not automatic).
+        
+        Args:
+            stream_id: UUID of stream to update
+            name: New display name
+            rtsp_url: New RTSP URL
+            status: New status (running/stopped)
+            hw_accel_enabled: Hardware acceleration toggle
+            ffmpeg_params: New FFmpeg parameters
+            target_fps: New target FPS
+            auto_start: New auto-start setting
+            
+        Returns:
+            Updated stream dict if found, None otherwise
+            
+        Raises:
+            ValueError: If validation fails
+        """
         config = load_streams()
         streams = config.get("streams", [])
         
@@ -197,6 +296,10 @@ class StreamsService:
                 raise ValueError(error_msg or "Invalid FPS")
             stream["target_fps"] = target_fps
         
+        # Update auto-start
+        if auto_start is not None:
+            stream["auto_start"] = auto_start
+        
         # Re-probe if URL changed
         if url_changed:
             logger.info(f"Re-probing stream {stream_id}")
@@ -220,7 +323,17 @@ class StreamsService:
     # ========================================================================
     
     async def delete_stream(self, stream_id: str) -> bool:
-        """Delete a stream and stop it if running."""
+        """Delete a stream and stop it if running.
+        
+        Stops FFmpeg process if active, removes configuration,
+        and renumbers remaining streams.
+        
+        Args:
+            stream_id: UUID of stream to delete
+            
+        Returns:
+            True if deleted, False if not found
+        """
         # Stop stream if running
         if stream_id in self.active_processes:
             await self.stop_stream(stream_id)
@@ -251,7 +364,17 @@ class StreamsService:
     # ========================================================================
     
     async def reorder_streams(self, order: list[str]) -> bool:
-        """Reorder streams by ID list."""
+        """Reorder streams by ID list.
+        
+        Args:
+            order: List of stream IDs in desired display order
+            
+        Returns:
+            True if successful
+            
+        Raises:
+            ValueError: If order list is invalid
+        """
         config = load_streams()
         streams = config.get("streams", [])
         
@@ -294,11 +417,57 @@ class StreamsService:
         return True
     
     # ========================================================================
+    # Auto-Start Support
+    # ========================================================================
+    
+    async def auto_start_configured_streams(self) -> None:
+        """Auto-start all streams with auto_start=True.
+        
+        Called on application startup to resume previously running streams
+        or start newly configured streams with auto-start enabled.
+        
+        Starts each stream as a background task to avoid blocking startup.
+        """
+        try:
+            streams = await self.list_streams()
+            auto_start_count = 0
+            
+            for stream in streams:
+                if stream.get("auto_start", False):
+                    stream_id = stream["id"]
+                    stream_name = stream.get("name", "Unknown")
+                    
+                    logger.info(f"Auto-starting stream: {stream_name} ({stream_id})")
+                    
+                    # Start as background task
+                    asyncio.create_task(self.start_stream(stream_id, stream))
+                    auto_start_count += 1
+            
+            if auto_start_count > 0:
+                logger.info(f"Queued {auto_start_count} streams for auto-start")
+            else:
+                logger.info("No streams configured for auto-start")
+                
+        except Exception as e:
+            logger.error(f"Error during auto-start: {e}", exc_info=True)
+    
+    # ========================================================================
     # FFmpeg Process Control
     # ========================================================================
     
     async def start_stream(self, stream_id: str, stream: dict) -> bool:
-        """Start FFmpeg processing for a stream."""
+        """Start FFmpeg processing for a stream.
+        
+        Starts FFmpeg subprocess to decode RTSP stream, creates pipe for
+        frame data, and opens OpenCV VideoCapture to read frames.
+        
+        Args:
+            stream_id: UUID of stream to start
+            stream: Stream configuration dict
+            
+        Returns:
+            True if started successfully, False otherwise
+        """
         try:
             if stream_id in self.active_processes:
                 logger.warning(f"Stream {stream_id} already running")
@@ -409,7 +578,17 @@ class StreamsService:
             return False
     
     async def stop_stream(self, stream_id: str) -> bool:
-        """Stop FFmpeg processing for a stream."""
+        """Stop FFmpeg processing for a stream.
+        
+        Releases OpenCV capture, closes pipe, and terminates FFmpeg process.
+        Uses graceful termination with fallback to kill after timeout.
+        
+        Args:
+            stream_id: UUID of stream to stop
+            
+        Returns:
+            True if stopped successfully, False if not running
+        """
         if stream_id not in self.active_processes:
             logger.warning(f"Stream {stream_id} not running")
             return False
@@ -459,7 +638,17 @@ class StreamsService:
             return False
     
     async def get_frame(self, stream_id: str) -> tuple[bool, Any] | None:
-        """Get next frame from stream pipe."""
+        """Get next frame from stream pipe.
+        
+        Reads one frame from OpenCV VideoCapture. This is a blocking
+        operation executed in thread pool.
+        
+        Args:
+            stream_id: UUID of stream to read from
+            
+        Returns:
+            Tuple of (success, frame) if stream active, None otherwise
+        """
         if stream_id not in self.active_processes:
             return None
         
@@ -476,7 +665,15 @@ class StreamsService:
     # ========================================================================
     
     def _find_stream_index(self, streams: list[dict], stream_id: str) -> int | None:
-        """Find stream index by ID."""
+        """Find stream index by ID.
+        
+        Args:
+            streams: List of stream dicts
+            stream_id: UUID to search for
+            
+        Returns:
+            Index if found, None otherwise
+        """
         for i, stream in enumerate(streams):
             if stream.get("id") == stream_id:
                 return i
@@ -488,7 +685,16 @@ class StreamsService:
         name: str,
         exclude_index: int | None = None
     ) -> None:
-        """Validate stream name is unique (case-insensitive)."""
+        """Validate stream name is unique (case-insensitive).
+        
+        Args:
+            streams: List of existing streams
+            name: Name to validate
+            exclude_index: Optional index to exclude (for updates)
+            
+        Raises:
+            ValueError: If name already exists
+        """
         normalized_name = normalize_stream_name(name)
         
         for i, stream in enumerate(streams):

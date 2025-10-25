@@ -1,4 +1,21 @@
-"""REST API endpoints for stream management."""
+"""REST API endpoints for stream management.
+
+This module provides FastAPI routes for managing RTSP streams, including:
+- CRUD operations (create, read, update, delete streams)
+- Stream control (start/stop FFmpeg processing)
+- MJPEG streaming endpoint for web viewing (full resolution, 5 FPS)
+- Real-time detection score streaming via SSE
+
+Key features:
+- Auto-validation of RTSP URLs and FFmpeg parameters
+- Hardware acceleration support (CUDA/NVDEC)
+- Concurrent stream limit enforcement
+- Full-resolution MJPEG output (no forced resizing)
+- Graceful error handling and logging
+
+Updated: Removed forced frame resizing to preserve original stream resolution.
+This allows the frontend to display full-quality video at native resolution.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -27,9 +44,14 @@ router = APIRouter(tags=["streams"])
 # ============================================================================
 
 MAX_CONCURRENT_STREAMS: Final[int] = 4
-MJPEG_FRAME_SIZE: Final[tuple[int, int]] = (640, 480)
-MJPEG_QUALITY: Final[int] = 80
+"""Maximum number of streams that can be actively processed simultaneously."""
+
+MJPEG_QUALITY: Final[int] = 85
+"""JPEG encoding quality (0-100). Higher = better quality but larger size.
+85 provides excellent quality for local network streaming."""
+
 SSE_FPS: Final[int] = 5
+"""Server-sent events frame rate for detection score streaming."""
 
 # Global lock for concurrent stream starts
 _start_lock = asyncio.Lock()
@@ -40,7 +62,11 @@ _start_lock = asyncio.Lock()
 # ============================================================================
 
 def get_streams_service() -> StreamsService:
-    """Dependency injection for streams service."""
+    """Dependency injection for streams service.
+    
+    Returns:
+        StreamsService instance for handling stream operations.
+    """
     return StreamsService()
 
 
@@ -53,7 +79,19 @@ async def validate_stream_config(
     ffmpeg_params: list[str] | None,
     hw_accel_enabled: bool
 ) -> None:
-    """Validate stream configuration."""
+    """Validate stream configuration before creation/update.
+    
+    Validates RTSP URL format, FFmpeg parameters, and hardware acceleration
+    compatibility. Raises ValueError if any validation fails.
+    
+    Args:
+        rtsp_url: RTSP URL to validate
+        ffmpeg_params: Optional FFmpeg parameters to validate
+        hw_accel_enabled: Whether hardware acceleration is enabled
+        
+    Raises:
+        ValueError: If validation fails with descriptive error message
+    """
     gpu_backend = get_gpu_backend()
     params = ffmpeg_params or []
     
@@ -70,7 +108,17 @@ async def validate_stream_config(
 
 
 def mask_stream_response(stream: dict) -> dict:
-    """Mask RTSP credentials in stream response."""
+    """Mask RTSP credentials in stream response for security.
+    
+    Replaces username/password in RTSP URLs with asterisks before
+    sending response to client.
+    
+    Args:
+        stream: Stream dict containing rtsp_url
+        
+    Returns:
+        Stream dict with masked credentials
+    """
     masked = stream.copy()
     if "rtsp_url" in masked:
         masked["rtsp_url"] = mask_rtsp_credentials(masked["rtsp_url"])
@@ -78,12 +126,22 @@ def mask_stream_response(stream: dict) -> dict:
 
 
 def encode_frame_to_jpeg(frame) -> bytes | None:
-    """Encode frame to JPEG (blocking operation for thread pool)."""
-    try:
-        height, width = frame.shape[:2]
-        if width != MJPEG_FRAME_SIZE[0] or height != MJPEG_FRAME_SIZE[1]:
-            frame = cv2.resize(frame, MJPEG_FRAME_SIZE)
+    """Encode OpenCV frame to JPEG bytes at original resolution.
+    
+    Encodes frame without resizing to preserve full quality. Uses high quality
+    JPEG encoding (85%) suitable for local network streaming.
+    
+    Args:
+        frame: OpenCV frame (numpy array) to encode
         
+    Returns:
+        JPEG bytes if encoding successful, None otherwise
+        
+    Note:
+        This is a blocking operation and should be called via asyncio.to_thread()
+        to avoid blocking the event loop.
+    """
+    try:
         ret, jpeg = cv2.imencode(
             '.jpg', 
             frame, 
@@ -104,10 +162,16 @@ def encode_frame_to_jpeg(frame) -> bytes | None:
 
 @router.get("/gpu-backend")
 async def get_gpu_info() -> dict:
-    """Get detected GPU backend.
+    """Get detected GPU backend information.
+    
+    Returns GPU backend type detected on system (cuda, none, etc.)
+    for hardware acceleration status.
     
     Returns:
-        GPU backend information
+        Dict with gpu_backend key
+        
+    Example:
+        {"gpu_backend": "cuda"}
     """
     backend = get_gpu_backend()
     return {"gpu_backend": backend}
@@ -118,13 +182,19 @@ async def reorder_streams(
     reorder_data: ReorderRequest,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Reorder streams.
+    """Reorder streams in the dashboard.
+    
+    Updates the display order of streams based on provided ID array.
     
     Args:
-        reorder_data: {"order": ["uuid1", "uuid2", ...]}
+        reorder_data: Request containing ordered array of stream IDs
+        service: Injected StreamsService instance
         
     Returns:
-        Success status
+        Success status and message
+        
+    Raises:
+        HTTPException: 400 if order array is invalid, 500 on server error
     """
     try:
         success = await service.reorder_streams(reorder_data.order)
@@ -150,7 +220,20 @@ async def reorder_streams(
 async def list_streams(
     service: StreamsService = Depends(get_streams_service)
 ) -> list[dict]:
-    """List all streams with masked credentials."""
+    """List all configured streams with masked credentials.
+    
+    Returns all streams in display order with RTSP credentials masked
+    for security.
+    
+    Args:
+        service: Injected StreamsService instance
+        
+    Returns:
+        List of stream dicts sorted by order
+        
+    Raises:
+        HTTPException: 500 on server error
+    """
     try:
         streams = await service.list_streams()
         return [mask_stream_response(stream) for stream in streams]
@@ -167,7 +250,21 @@ async def create_stream(
     new_stream: NewStream,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Create a new stream with validation."""
+    """Create a new stream with validation and auto-start support.
+    
+    Creates a new stream configuration, validates RTSP URL and parameters,
+    and optionally auto-starts the stream if auto_start is enabled.
+    
+    Args:
+        new_stream: Stream creation request with all required fields
+        service: Injected StreamsService instance
+        
+    Returns:
+        Created stream dict with masked credentials
+        
+    Raises:
+        HTTPException: 400 on validation error, 500 on server error
+    """
     try:
         # Validate configuration
         await validate_stream_config(
@@ -176,13 +273,14 @@ async def create_stream(
             hw_accel_enabled=new_stream.hw_accel_enabled
         )
         
-        # Create stream
+        # Create stream with auto_start support
         stream = await service.create_stream(
             name=new_stream.name,
             rtsp_url=new_stream.rtsp_url,
             hw_accel_enabled=new_stream.hw_accel_enabled,
             ffmpeg_params=new_stream.ffmpeg_params,
-            target_fps=new_stream.target_fps
+            target_fps=new_stream.target_fps,
+            auto_start=new_stream.auto_start
         )
         
         return mask_stream_response(stream)
@@ -204,7 +302,18 @@ async def get_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Get a single stream by ID."""
+    """Get a single stream by ID.
+    
+    Args:
+        stream_id: UUID of stream to retrieve
+        service: Injected StreamsService instance
+        
+    Returns:
+        Stream dict with masked credentials
+        
+    Raises:
+        HTTPException: 404 if stream not found, 500 on server error
+    """
     try:
         stream = await service.get_stream(stream_id)
         if not stream:
@@ -232,7 +341,19 @@ async def update_stream(
 ) -> dict:
     """Update an existing stream (partial update).
     
-    Supports both PATCH and PUT methods.
+    Supports both PATCH and PUT methods. Only updates fields that are
+    explicitly provided in the request.
+    
+    Args:
+        stream_id: UUID of stream to update
+        edit_stream: Update request with optional fields
+        service: Injected StreamsService instance
+        
+    Returns:
+        Updated stream dict with masked credentials
+        
+    Raises:
+        HTTPException: 400 on validation error, 404 if not found, 500 on server error
     """
     try:
         # Get current stream
@@ -263,7 +384,8 @@ async def update_stream(
             status=edit_stream.status,
             hw_accel_enabled=edit_stream.hw_accel_enabled,
             ffmpeg_params=edit_stream.ffmpeg_params,
-            target_fps=edit_stream.target_fps
+            target_fps=edit_stream.target_fps,
+            auto_start=edit_stream.auto_start
         )
         
         if not updated_stream:
@@ -293,7 +415,18 @@ async def delete_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> None:
-    """Delete a stream."""
+    """Delete a stream and stop it if running.
+    
+    Stops the stream's FFmpeg process if active, then removes the
+    stream configuration.
+    
+    Args:
+        stream_id: UUID of stream to delete
+        service: Injected StreamsService instance
+        
+    Raises:
+        HTTPException: 404 if stream not found, 500 on server error
+    """
     try:
         deleted = await service.delete_stream(stream_id)
         if not deleted:
@@ -320,7 +453,22 @@ async def start_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Start stream processing."""
+    """Start FFmpeg stream processing.
+    
+    Starts FFmpeg process to decode RTSP stream and make frames available
+    for MJPEG streaming and person detection.
+    
+    Args:
+        stream_id: UUID of stream to start
+        service: Injected StreamsService instance
+        
+    Returns:
+        Status message and current stream status
+        
+    Raises:
+        HTTPException: 404 if not found, 409 if concurrent limit reached,
+                      503 if start fails, 500 on server error
+    """
     try:
         stream = await service.get_stream(stream_id)
         if not stream:
@@ -362,7 +510,20 @@ async def stop_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Stop stream processing."""
+    """Stop FFmpeg stream processing.
+    
+    Terminates the FFmpeg process and releases resources.
+    
+    Args:
+        stream_id: UUID of stream to stop
+        service: Injected StreamsService instance
+        
+    Returns:
+        Status message and current stream status
+        
+    Raises:
+        HTTPException: 404 if not found, 500 on error
+    """
     try:
         stream = await service.get_stream(stream_id)
         if not stream:
@@ -401,7 +562,28 @@ async def stream_mjpeg(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> StreamingResponse:
-    """Stream MJPEG for a specific stream."""
+    """Stream MJPEG video at full resolution for web viewing.
+    
+    Provides multipart MJPEG stream at original resolution (no resizing).
+    Each frame is JPEG-encoded at 85% quality. Frame rate matches the
+    stream's configured target_fps (typically 5 FPS).
+    
+    This endpoint is designed for local network use where bandwidth is
+    sufficient for full-resolution streaming.
+    
+    Args:
+        stream_id: UUID of stream to view
+        service: Injected StreamsService instance
+        
+    Returns:
+        StreamingResponse with multipart MJPEG content
+        
+    Raises:
+        HTTPException: 404 if not found, 400 if stream not running
+        
+    Note:
+        Stream must be started before accessing this endpoint.
+    """
     stream = await service.get_stream(stream_id)
     if not stream:
         raise HTTPException(
@@ -418,8 +600,20 @@ async def stream_mjpeg(
     fps = stream.get("target_fps", 5)
     
     async def generate_frames():
+        """Generate MJPEG frame stream with proper timing."""
         try:
+            frame_interval = 1.0 / fps
+            last_frame_time = 0
+            
             while True:
+                current_time = asyncio.get_event_loop().time()
+                
+                # Throttle frame rate to prevent overwhelming client
+                if last_frame_time > 0:
+                    elapsed = current_time - last_frame_time
+                    if elapsed < frame_interval:
+                        await asyncio.sleep(frame_interval - elapsed)
+                
                 frame_data = await service.get_frame(stream_id)
                 if frame_data is None:
                     break
@@ -428,17 +622,21 @@ async def stream_mjpeg(
                 if not ret or frame is None:
                     break
                 
+                # Encode frame at original resolution in thread pool
                 jpeg_bytes = await asyncio.to_thread(encode_frame_to_jpeg, frame)
                 if jpeg_bytes is None:
                     continue
                 
+                # Yield MJPEG multipart frame
                 yield (
                     b'--frame\r\n'
                     b'Content-Type: image/jpeg\r\n'
                     b'Content-Length: ' + str(len(jpeg_bytes)).encode() + b'\r\n\r\n' +
                     jpeg_bytes + b'\r\n'
                 )
-                await asyncio.sleep(1 / fps)
+                
+                last_frame_time = asyncio.get_event_loop().time()
+                
         except asyncio.CancelledError:
             logger.info(f"MJPEG stream cancelled for {stream_id}")
             raise
@@ -462,7 +660,22 @@ async def stream_scores_sse(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> StreamingResponse:
-    """SSE endpoint for real-time detection scores."""
+    """SSE endpoint for real-time detection scores.
+    
+    Provides Server-Sent Events stream with person detection scores
+    and bounding box coordinates. Currently returns placeholder data;
+    will be replaced with actual YOLO detection results.
+    
+    Args:
+        stream_id: UUID of stream to monitor
+        service: Injected StreamsService instance
+        
+    Returns:
+        StreamingResponse with text/event-stream content
+        
+    Raises:
+        HTTPException: 404 if not found, 400 if not running
+    """
     stream = await service.get_stream(stream_id)
     if not stream:
         raise HTTPException(
@@ -477,6 +690,7 @@ async def stream_scores_sse(
         )
     
     async def event_generator():
+        """Generate SSE events with detection scores."""
         try:
             while True:
                 frame_data = await service.get_frame(stream_id)

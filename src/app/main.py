@@ -1,11 +1,12 @@
 """FastAPI application entry point."""
 from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+import asyncio
 import logging
 import os
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .api import health, streams, zones
@@ -15,6 +16,9 @@ from .api.errors import (
     general_exception_handler
 )
 from .logging_config import setup_logging
+from .middleware.rate_limit import RateLimitMiddleware
+from .middleware.request_id import RequestIDMiddleware
+from .services.streams_service import StreamsService
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +27,7 @@ setup_logging()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context manager.
     
     Handles startup and shutdown events using modern FastAPI pattern.
@@ -32,11 +36,37 @@ async def lifespan(app: FastAPI):
     logger.info("ProxiMeter starting up...")
     logger.info("API documentation available at /docs")
     
+    # Auto-start configured streams
+    try:
+        service = StreamsService()
+        await service.auto_start_configured_streams()
+    except Exception as e:
+        logger.error(f"Error during auto-start: {e}", exc_info=True)
+
+    logger.info("ProxiMeter started")
+
     yield
     
     # Shutdown
     logger.info("ProxiMeter shutting down...")
 
+    # Stop all running streams
+    try:
+        service = StreamsService()
+        streams = await service.list_streams()
+        
+        stop_tasks = []
+        for stream in streams:
+            if stream.get("status") == "running":
+                stop_tasks.append(service.stop_stream(stream["id"]))
+        
+        if stop_tasks:
+            await asyncio.gather(*stop_tasks, return_exceptions=True)
+            logger.info(f"Stopped {len(stop_tasks)} streams")
+    except Exception as e:
+        logger.error(f"Shutdown error: {e}", exc_info=True)
+    
+    logger.info("ProxiMeter shutdown complete")
 
 # ============================================================================
 # Application Configuration
@@ -61,6 +91,15 @@ app = FastAPI(
 app.add_exception_handler(RequestValidationError, validation_exception_handler) # type: ignore
 app.add_exception_handler(StarletteHTTPException, http_exception_handler) # type: ignore
 app.add_exception_handler(Exception, general_exception_handler)
+
+
+# ============================================================================
+# Middleware
+# ============================================================================
+
+# Register rate limiting and request ID middleware
+app.add_middleware(RequestIDMiddleware)
+app.add_middleware(RateLimitMiddleware, requests_per_second=5.0, burst=10)
 
 
 # ============================================================================
@@ -89,24 +128,12 @@ app.include_router(
 
 
 # ============================================================================
-# Static File Serving
+# Root Endpoint
 # ============================================================================
 
-# Get static directory from environment or use default
-STATIC_DIR = os.getenv("STATIC_ROOT", "/app/src/app/static/frontend")
-
-# Serve frontend static files (must be last to not override API routes)
-if os.path.exists(STATIC_DIR):
-    app.mount(
-        "/",
-        StaticFiles(directory=STATIC_DIR, html=True),
-        name="frontend"
-    )
-    logger.info(f"Serving static files from: {STATIC_DIR}")
-else:
-    logger.warning(f"Static directory not found: {STATIC_DIR}")
-    logger.warning("Frontend will not be available")
-
+@app.get("/")
+async def root():
+    return {"name": "ProxiMeter API", "version": "1.0.0", "status": "operational"}
 
 # ============================================================================
 # Application Info
@@ -138,7 +165,7 @@ Streams:
     DELETE /api/streams/{id}                - Delete stream
     POST   /api/streams/{id}/start          - Start stream
     POST   /api/streams/{id}/stop           - Stop stream
-    POST   /api/streams/reorder              - Reorder streams
+    POST   /api/streams/reorder             - Reorder streams
     GET    /api/streams/{id}/mjpeg          - MJPEG stream
     GET    /api/streams/{id}/scores         - SSE detection scores
     GET    /api/streams/gpu-backend         - Get GPU backend
