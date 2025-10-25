@@ -6,6 +6,7 @@ import logging
 import os
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -126,6 +127,25 @@ app.include_router(
     tags=["zones"]
 )
 
+
+# ============================================================================
+# Static File Serving
+# ============================================================================
+
+# Get static directory from environment or use default
+STATIC_DIR = os.getenv("STATIC_ROOT", "/app/src/app/static/frontend")
+
+# Serve frontend static files (must be last to not override API routes)
+if os.path.exists(STATIC_DIR):
+    app.mount(
+        "/",
+        StaticFiles(directory=STATIC_DIR, html=True),
+        name="frontend"
+    )
+    logger.info(f"Serving static files from: {STATIC_DIR}")
+else:
+    logger.warning(f"Static directory not found: {STATIC_DIR}")
+    logger.warning("Frontend will not be available")
 
 
 # ============================================================================
