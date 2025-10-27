@@ -718,7 +718,7 @@ class StreamsService:
             '-loglevel', 'warning',
             '-threads', '2',
             '-rtsp_transport', 'tcp',
-            '-listen_timeout', '10000000',
+            '-stimeout', '5000000',
         ]
         
         # Add GPU-specific parameters if hardware acceleration enabled
@@ -727,19 +727,16 @@ class StreamsService:
                 params.extend([
                     '-hwaccel', 'cuda',
                     '-hwaccel_output_format', 'cuda',
-                    # '-c:v', 'h264_cuvid',
                 ])
             elif self.gpu_backend == "amd":
                 params.extend([
                     '-hwaccel', 'vaapi',
                     '-hwaccel_device', '/dev/dri/renderD128',
-                    # '-c:v', 'h264',
                 ])
             elif self.gpu_backend == "intel":
                 params.extend([
                     '-hwaccel', 'qsv',
                     '-hwaccel_device', '/dev/dri/renderD128',
-                    # '-c:v', 'h264_qsv',
                 ])
         
         return params

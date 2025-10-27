@@ -81,6 +81,10 @@ def build_ffmpeg_command(
     # Force FPS output
     cmd.extend(["-r", "5"])
     
+    # Add hwdownload filter if using GPU acceleration
+    if gpu_backend and gpu_backend != "none":
+        cmd.extend(["-vf", "hwdownload,format=nv12"])
+
     # Output configuration: MJPEG to stdout
     cmd.extend([
         "-c:v", "mjpeg",           # MJPEG codec
