@@ -1,15 +1,8 @@
 /**
- * StreamCard Component - Individual Stream Display with Real-time Updates
+ * StreamCard Component - Stream Thumbnail Display
  * 
- * Displays a single RTSP stream with:
- * - Live video preview via VideoPlayer
- * - Real-time detection scores overlay (distance, coordinates, size)
- * - Status badge with visual indicators (Active/Inactive/Pending)
- * - Stream metadata (name, RTSP URL, created date)
- * - Action buttons (Play, Edit, Delete)
- * 
- * Scores are now obtained from the parent useStreams hook to avoid
- * duplicate SSE connections and infinite loops.
+ * Displays stream information with a single JPEG snapshot preview.
+ * Click "Play" to open full streaming view in new window.
  * 
  * @module components/StreamCard
  */
@@ -18,19 +11,16 @@ import { Link } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Edit2, Play, Trash2, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
+import { Edit2, Play, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw } from 'lucide-react'
 import type { StreamResponse } from '@/lib/types'
 import { truncateText, maskRtspUrl } from '@/lib/utils'
-import VideoPlayer from './VideoPlayer'
+import { useState, useEffect } from 'react'
 import type { ReactElement } from 'react'
 
 // ============================================================================
 // Type Definitions
 // ============================================================================
 
-/**
- * Score data structure for real-time person detection metrics
- */
 interface ScoreData {
   distance?: number
   coordinates?: { x: number; y: number }
@@ -38,15 +28,9 @@ interface ScoreData {
   [key: string]: unknown
 }
 
-/**
- * Props for StreamCard component
- */
 interface StreamCardProps {
-  /** Stream object containing all stream data */
   stream: StreamResponse
-  /** Real-time scores from SSE (provided by parent useStreams hook) */
   scores?: ScoreData
-  /** Callback when delete button is clicked */
   onDelete?: (streamId: string) => void
 }
 
@@ -54,19 +38,7 @@ interface StreamCardProps {
 // Helper Functions
 // ============================================================================
 
-/**
- * Determines the appropriate status badge based on stream status
- * 
- * Status mapping:
- * - 'running' / 'Active' → Green badge with checkmark
- * - 'stopped' / 'Inactive' → Red badge with alert icon
- * - Other → Yellow badge with clock icon (Pending/Unknown)
- * 
- * @param status - Current stream status
- * @returns React element with styled badge
- */
 function getStatusBadge(status: string): ReactElement {
-  // Normalize status (handle both 'running'/'stopped' and 'Active'/'Inactive')
   const normalizedStatus = status.toLowerCase()
 
   if (normalizedStatus === 'active' || normalizedStatus === 'running') {
@@ -87,7 +59,6 @@ function getStatusBadge(status: string): ReactElement {
     )
   }
 
-  // Default: pending or unknown status
   return (
     <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-950 dark:text-yellow-400 dark:border-yellow-800">
       <Clock className="h-3 w-3 mr-1" />
@@ -96,12 +67,6 @@ function getStatusBadge(status: string): ReactElement {
   )
 }
 
-/**
- * Formats score data into a readable string for overlay display
- * 
- * @param scores - Score data object
- * @returns Formatted string with distance, position, and size
- */
 function formatScoresText(scores: ScoreData): string {
   const parts: string[] = []
 
@@ -127,62 +92,72 @@ function formatScoresText(scores: ScoreData): string {
 // ============================================================================
 
 /**
- * StreamCard Component
+ * StreamCard Component - Snapshot Preview Only
  * 
- * CRITICAL FIX: Removed internal SSE connection to prevent infinite loop.
- * Scores are now passed as props from parent useStreams hook, which manages
- * all SSE connections centrally.
+ * Shows a single JPEG snapshot that refreshes periodically.
+ * The snapshot endpoint provides the latest frame from the MJPEG stream.
  * 
  * @example
  * ```
- * const { streams, scores } = useStreams()
- * 
- * {streams.map(stream => (
- *   <StreamCard 
- *     key={stream.id} 
- *     stream={stream} 
- *     scores={scores[stream.id]}
- *     onDelete={handleDelete}
- *   />
- * ))}
+ * <StreamCard 
+ *   stream={stream} 
+ *   scores={scores[stream.id]}
+ *   onDelete={handleDelete}
+ * />
  * ```
  */
 export default function StreamCard({ stream, scores, onDelete }: StreamCardProps) {
   
   // ============================================================================
+  // State Management
+  // ============================================================================
+  
+  const [snapshotKey, setSnapshotKey] = useState(0)
+  const [imageError, setImageError] = useState(false)
+
+  // Refresh snapshot every 5 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSnapshotKey(prev => prev + 1)
+      setImageError(false)
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  // ============================================================================
   // Data Preparation
   // ============================================================================
 
-  // Truncate long stream names for display (full name shown in tooltip)
   const truncatedName = truncateText(stream.name, 40)
-  
-  // Mask sensitive RTSP URL (hide username/password)
   const maskedUrl = maskRtspUrl(stream.rtsp_url)
-  
-  // Show last 20 characters of masked URL for quick reference
-  const displayUrl = maskedUrl.length > 20 
-    ? '...' + maskedUrl.slice(-20) 
-    : maskedUrl
-
-  // Format created date for display
+  const displayUrl = maskedUrl.length > 20 ? '...' + maskedUrl.slice(-20) : maskedUrl
   const createdDate = new Date(stream.created_at).toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'short',
     day: 'numeric'
   })
 
+  // Snapshot URL with cache-busting key
+  const snapshotUrl = `/api/streams/${stream.id}/snapshot?t=${snapshotKey}`
+
   // ============================================================================
   // Event Handlers
   // ============================================================================
 
-  /**
-   * Handles delete button click
-   * Calls parent callback if provided
-   */
   const handleDelete = () => {
     if (onDelete) {
       onDelete(stream.id)
     }
+  }
+
+  const handleRefreshSnapshot = () => {
+    setSnapshotKey(prev => prev + 1)
+    setImageError(false)
+  }
+
+  const handleImageError = () => {
+    setImageError(true)
   }
 
   // ============================================================================
@@ -190,13 +165,11 @@ export default function StreamCard({ stream, scores, onDelete }: StreamCardProps
   // ============================================================================
 
   return (
-    <Card className="flex flex-col h-full hover:shadow-lg transition-all duration-200 hover:scale-[1.02]">
+    <Card className="flex flex-col h-full hover:shadow-lg transition-all duration-200">
       
-      {/* Header: Stream name, URL, and status badge */}
+      {/* Header: Stream name and status */}
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
-          
-          {/* Stream name and URL */}
           <div className="flex-1 min-w-0">
             <CardTitle 
               className="text-lg truncate font-semibold" 
@@ -211,15 +184,13 @@ export default function StreamCard({ stream, scores, onDelete }: StreamCardProps
               {displayUrl}
             </CardDescription>
           </div>
-
-          {/* Status badge */}
-          <div className="shrink-0">
+          <div className="flex-shrink-0">
             {getStatusBadge(stream.status)}
           </div>
         </div>
       </CardHeader>
 
-      {/* Content: Video preview, scores, and metadata */}
+      {/* Content: Snapshot and metadata */}
       <CardContent className="flex-1 space-y-4 pb-4">
         
         {/* Stream metadata */}
@@ -234,15 +205,50 @@ export default function StreamCard({ stream, scores, onDelete }: StreamCardProps
           </div>
         </div>
 
-        {/* Video player with optional scores overlay */}
-        <div className="relative w-full">
-          <VideoPlayer streamId={stream.id} rtspUrl={stream.rtsp_url} />
-          
-          {/* Scores overlay - only shown when scores are available */}
-          {scores && (
-            <div className="absolute top-2 left-2 right-2 pointer-events-none">
-              <div className="bg-black/70 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-md border border-white/20 font-mono">
-                {formatScoresText(scores)}
+        {/* Snapshot preview with scores overlay */}
+        <div className="relative w-full aspect-video bg-black rounded-md overflow-hidden">
+          {!imageError ? (
+            <>
+              <img
+                src={snapshotUrl}
+                alt={`${stream.name} snapshot`}
+                className="w-full h-full object-contain"
+                onError={handleImageError}
+              />
+              
+              {/* Scores overlay */}
+              {scores && (
+                <div className="absolute top-2 left-2 right-2 pointer-events-none">
+                  <div className="bg-black/70 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-md border border-white/20 font-mono">
+                    {formatScoresText(scores)}
+                  </div>
+                </div>
+              )}
+
+              {/* Refresh indicator */}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="absolute bottom-2 right-2 h-8 w-8 p-0 bg-black/50 hover:bg-black/70 text-white"
+                onClick={handleRefreshSnapshot}
+                title="Refresh snapshot"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </>
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-muted">
+              <div className="text-center space-y-2">
+                <AlertCircle className="h-8 w-8 mx-auto text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Snapshot unavailable</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleRefreshSnapshot}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Retry
+                </Button>
               </div>
             </div>
           )}
@@ -250,23 +256,20 @@ export default function StreamCard({ stream, scores, onDelete }: StreamCardProps
 
         {/* Action buttons */}
         <div className="flex flex-col gap-2 pt-2">
-          
-          {/* Primary actions: Play and Edit */}
           <div className="flex gap-2">
-            {/* Play button - navigates to full screen view */}
-            <Link to={`/play/${stream.id}`} className="flex-1">
-              <Button 
-                size="sm" 
-                className="w-full" 
-                variant="default"
-                title="View stream in full screen"
-              >
-                <Play className="h-4 w-4 mr-1" />
-                Play
-              </Button>
-            </Link>
+            {/* Play button - opens in new window */}
+            <Button 
+              size="sm" 
+              className="flex-1" 
+              variant="default"
+              onClick={() => window.open(`/play/${stream.id}`, '_blank', 'width=1280,height=720')}
+              title="Open stream in new window"
+            >
+              <Play className="h-4 w-4 mr-1" />
+              Play
+            </Button>
 
-            {/* Edit button - navigates to edit form */}
+            {/* Edit button */}
             <Link to={`/edit/${stream.id}`} className="flex-1">
               <Button 
                 size="sm" 
@@ -280,7 +283,7 @@ export default function StreamCard({ stream, scores, onDelete }: StreamCardProps
             </Link>
           </div>
 
-          {/* Destructive action: Delete */}
+          {/* Delete button */}
           <Button 
             size="sm" 
             variant="ghost" 

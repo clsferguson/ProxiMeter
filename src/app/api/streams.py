@@ -1,20 +1,13 @@
 """REST API endpoints for stream management.
 
-This module provides FastAPI routes for managing RTSP streams, including:
-- CRUD operations (create, read, update, delete streams)
-- Stream control (start/stop FFmpeg processing)
-- MJPEG streaming endpoint for web viewing (full resolution, 5 FPS)
-- Real-time detection score streaming via SSE
+This module provides FastAPI routes for managing RTSP streams with GPU acceleration.
 
-Key features:
-- Auto-validation of RTSP URLs and FFmpeg parameters
-- Hardware acceleration support (CUDA/NVDEC)
-- Concurrent stream limit enforcement
-- Full-resolution MJPEG output (no forced resizing)
-- Graceful error handling and logging
-
-Updated: Removed forced frame resizing to preserve original stream resolution.
-This allows the frontend to display full-quality video at native resolution.
+Updated for GPU-only architecture:
+- Enforces GPU backend detection from entrypoint.sh
+- No CPU fallback (fail-fast)
+- Adds snapshot endpoint for dashboard thumbnails
+- 5fps MJPEG streaming at full resolution
+- Constitution-compliant security and observability
 """
 from __future__ import annotations
 
@@ -22,12 +15,14 @@ import asyncio
 import json
 import logging
 import random
+import io
 from datetime import datetime, timezone
 from typing import Final
 
 import cv2
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse, Response
+from PIL import Image
 
 from ..models.stream import NewStream, EditStream, ReorderRequest
 from ..services.streams_service import StreamsService
@@ -47,11 +42,13 @@ MAX_CONCURRENT_STREAMS: Final[int] = 4
 """Maximum number of streams that can be actively processed simultaneously."""
 
 MJPEG_QUALITY: Final[int] = 85
-"""JPEG encoding quality (0-100). Higher = better quality but larger size.
-85 provides excellent quality for local network streaming."""
+"""JPEG encoding quality (0-100). Higher = better quality but larger size."""
 
 SSE_FPS: Final[int] = 5
 """Server-sent events frame rate for detection score streaming."""
+
+SNAPSHOT_TIMEOUT: Final[float] = 2.0
+"""Timeout in seconds for capturing snapshot frame."""
 
 # Global lock for concurrent stream starts
 _start_lock = asyncio.Lock()
@@ -62,11 +59,7 @@ _start_lock = asyncio.Lock()
 # ============================================================================
 
 def get_streams_service() -> StreamsService:
-    """Dependency injection for streams service.
-    
-    Returns:
-        StreamsService instance for handling stream operations.
-    """
+    """Dependency injection for streams service."""
     return StreamsService()
 
 
@@ -81,8 +74,10 @@ async def validate_stream_config(
 ) -> None:
     """Validate stream configuration before creation/update.
     
-    Validates RTSP URL format, FFmpeg parameters, and hardware acceleration
-    compatibility. Raises ValueError if any validation fails.
+    Constitution-compliant validation:
+    - GPU backend MUST be detected (no CPU fallback)
+    - FFmpeg params validated for shell injection
+    - RTSP URL format validated
     
     Args:
         rtsp_url: RTSP URL to validate
@@ -91,9 +86,17 @@ async def validate_stream_config(
         
     Raises:
         ValueError: If validation fails with descriptive error message
+        RuntimeError: If GPU required but not detected
     """
     gpu_backend = get_gpu_backend()
     params = ffmpeg_params or []
+    
+    # Constitution Principle III: GPU backend contract
+    if gpu_backend == "none":
+        raise RuntimeError(
+            "GPU backend not detected. This application requires GPU acceleration. "
+            "Ensure NVIDIA/AMD/Intel GPU with drivers is available."
+        )
     
     if not validate_rtsp_url(rtsp_url, params, gpu_backend):
         raise ValueError("Invalid RTSP URL or FFmpeg parameters")
@@ -103,22 +106,12 @@ async def validate_stream_config(
         rtsp_url=rtsp_url,
         ffmpeg_params=params,
         target_fps=5,
-        gpu_backend=gpu_backend if hw_accel_enabled else None
+        gpu_backend=gpu_backend
     )
 
 
 def mask_stream_response(stream: dict) -> dict:
-    """Mask RTSP credentials in stream response for security.
-    
-    Replaces username/password in RTSP URLs with asterisks before
-    sending response to client.
-    
-    Args:
-        stream: Stream dict containing rtsp_url
-        
-    Returns:
-        Stream dict with masked credentials
-    """
+    """Mask RTSP credentials in stream response for security."""
     masked = stream.copy()
     if "rtsp_url" in masked:
         masked["rtsp_url"] = mask_rtsp_credentials(masked["rtsp_url"])
@@ -128,18 +121,7 @@ def mask_stream_response(stream: dict) -> dict:
 def encode_frame_to_jpeg(frame) -> bytes | None:
     """Encode OpenCV frame to JPEG bytes at original resolution.
     
-    Encodes frame without resizing to preserve full quality. Uses high quality
-    JPEG encoding (85%) suitable for local network streaming.
-    
-    Args:
-        frame: OpenCV frame (numpy array) to encode
-        
-    Returns:
-        JPEG bytes if encoding successful, None otherwise
-        
-    Note:
-        This is a blocking operation and should be called via asyncio.to_thread()
-        to avoid blocking the event loop.
+    Full-resolution encoding as per constitution requirements.
     """
     try:
         ret, jpeg = cv2.imencode(
@@ -164,17 +146,22 @@ def encode_frame_to_jpeg(frame) -> bytes | None:
 async def get_gpu_info() -> dict:
     """Get detected GPU backend information.
     
-    Returns GPU backend type detected on system (cuda, none, etc.)
-    for hardware acceleration status.
+    Returns GPU backend detected by entrypoint.sh via GPU_BACKEND_DETECTED env var.
+    Constitution Principle III: Explicit GPU backend contract.
     
     Returns:
-        Dict with gpu_backend key
-        
-    Example:
-        {"gpu_backend": "cuda"}
+        Dict with gpu_backend key (nvidia, amd, intel, or none)
     """
     backend = get_gpu_backend()
-    return {"gpu_backend": backend}
+    
+    if backend == "none":
+        logger.warning("GPU backend not detected - application requires GPU")
+    
+    return {
+        "gpu_backend": backend,
+        "gpu_required": True,
+        "message": f"GPU backend: {backend}" if backend != "none" else "No GPU detected - application will fail to start streams"
+    }
 
 
 @router.post("/reorder")
@@ -182,20 +169,7 @@ async def reorder_streams(
     reorder_data: ReorderRequest,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Reorder streams in the dashboard.
-    
-    Updates the display order of streams based on provided ID array.
-    
-    Args:
-        reorder_data: Request containing ordered array of stream IDs
-        service: Injected StreamsService instance
-        
-    Returns:
-        Success status and message
-        
-    Raises:
-        HTTPException: 400 if order array is invalid, 500 on server error
-    """
+    """Reorder streams in the dashboard."""
     try:
         success = await service.reorder_streams(reorder_data.order)
         return {"success": success, "message": "Streams reordered successfully"}
@@ -220,20 +194,7 @@ async def reorder_streams(
 async def list_streams(
     service: StreamsService = Depends(get_streams_service)
 ) -> list[dict]:
-    """List all configured streams with masked credentials.
-    
-    Returns all streams in display order with RTSP credentials masked
-    for security.
-    
-    Args:
-        service: Injected StreamsService instance
-        
-    Returns:
-        List of stream dicts sorted by order
-        
-    Raises:
-        HTTPException: 500 on server error
-    """
+    """List all configured streams with masked credentials."""
     try:
         streams = await service.list_streams()
         return [mask_stream_response(stream) for stream in streams]
@@ -252,21 +213,10 @@ async def create_stream(
 ) -> dict:
     """Create a new stream with validation and auto-start support.
     
-    Creates a new stream configuration, validates RTSP URL and parameters,
-    and optionally auto-starts the stream if auto_start is enabled.
-    
-    Args:
-        new_stream: Stream creation request with all required fields
-        service: Injected StreamsService instance
-        
-    Returns:
-        Created stream dict with masked credentials
-        
-    Raises:
-        HTTPException: 400 on validation error, 500 on server error
+    Constitution Principle III: GPU backend validation on creation.
     """
     try:
-        # Validate configuration
+        # Validate configuration (includes GPU check)
         await validate_stream_config(
             rtsp_url=new_stream.rtsp_url,
             ffmpeg_params=new_stream.ffmpeg_params,
@@ -284,6 +234,12 @@ async def create_stream(
         )
         
         return mask_stream_response(stream)
+    except RuntimeError as e:
+        # GPU detection failures
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e)
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -302,18 +258,7 @@ async def get_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Get a single stream by ID.
-    
-    Args:
-        stream_id: UUID of stream to retrieve
-        service: Injected StreamsService instance
-        
-    Returns:
-        Stream dict with masked credentials
-        
-    Raises:
-        HTTPException: 404 if stream not found, 500 on server error
-    """
+    """Get a single stream by ID."""
     try:
         stream = await service.get_stream(stream_id)
         if not stream:
@@ -339,22 +284,7 @@ async def update_stream(
     edit_stream: EditStream,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Update an existing stream (partial update).
-    
-    Supports both PATCH and PUT methods. Only updates fields that are
-    explicitly provided in the request.
-    
-    Args:
-        stream_id: UUID of stream to update
-        edit_stream: Update request with optional fields
-        service: Injected StreamsService instance
-        
-    Returns:
-        Updated stream dict with masked credentials
-        
-    Raises:
-        HTTPException: 400 on validation error, 404 if not found, 500 on server error
-    """
+    """Update an existing stream (partial update)."""
     try:
         # Get current stream
         current_stream = await service.get_stream(stream_id)
@@ -395,6 +325,11 @@ async def update_stream(
             )
         
         return mask_stream_response(updated_stream)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e)
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -415,18 +350,7 @@ async def delete_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> None:
-    """Delete a stream and stop it if running.
-    
-    Stops the stream's FFmpeg process if active, then removes the
-    stream configuration.
-    
-    Args:
-        stream_id: UUID of stream to delete
-        service: Injected StreamsService instance
-        
-    Raises:
-        HTTPException: 404 if stream not found, 500 on server error
-    """
+    """Delete a stream and stop it if running."""
     try:
         deleted = await service.delete_stream(stream_id)
         if not deleted:
@@ -453,23 +377,19 @@ async def start_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Start FFmpeg stream processing.
+    """Start FFmpeg stream processing with GPU acceleration.
     
-    Starts FFmpeg process to decode RTSP stream and make frames available
-    for MJPEG streaming and person detection.
-    
-    Args:
-        stream_id: UUID of stream to start
-        service: Injected StreamsService instance
-        
-    Returns:
-        Status message and current stream status
-        
-    Raises:
-        HTTPException: 404 if not found, 409 if concurrent limit reached,
-                      503 if start fails, 500 on server error
+    Constitution Principle III: Fail-fast if GPU not available.
     """
     try:
+        # Check GPU backend
+        gpu_backend = get_gpu_backend()
+        if gpu_backend == "none":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="GPU backend not detected. Cannot start stream."
+            )
+        
         stream = await service.get_stream(stream_id)
         if not stream:
             raise HTTPException(
@@ -494,7 +414,7 @@ async def start_stream(
                     detail="Failed to start stream processing"
                 )
         
-        return {"message": "Stream started successfully", "status": "running"}
+        return {"message": "Stream started successfully", "status": "running", "gpu_backend": gpu_backend}
     except HTTPException:
         raise
     except Exception as e:
@@ -510,20 +430,7 @@ async def stop_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Stop FFmpeg stream processing.
-    
-    Terminates the FFmpeg process and releases resources.
-    
-    Args:
-        stream_id: UUID of stream to stop
-        service: Injected StreamsService instance
-        
-    Returns:
-        Status message and current stream status
-        
-    Raises:
-        HTTPException: 404 if not found, 500 on error
-    """
+    """Stop FFmpeg stream processing."""
     try:
         stream = await service.get_stream(stream_id)
         if not stream:
@@ -562,27 +469,9 @@ async def stream_mjpeg(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> StreamingResponse:
-    """Stream MJPEG video at full resolution for web viewing.
+    """Stream MJPEG video at full resolution (5fps) for web viewing.
     
-    Provides multipart MJPEG stream at original resolution (no resizing).
-    Each frame is JPEG-encoded at 85% quality. Frame rate matches the
-    stream's configured target_fps (typically 5 FPS).
-    
-    This endpoint is designed for local network use where bandwidth is
-    sufficient for full-resolution streaming.
-    
-    Args:
-        stream_id: UUID of stream to view
-        service: Injected StreamsService instance
-        
-    Returns:
-        StreamingResponse with multipart MJPEG content
-        
-    Raises:
-        HTTPException: 404 if not found, 400 if stream not running
-        
-    Note:
-        Stream must be started before accessing this endpoint.
+    Constitution Principle II: 5 FPS cap, full resolution, no video storage.
     """
     stream = await service.get_stream(stream_id)
     if not stream:
@@ -608,7 +497,7 @@ async def stream_mjpeg(
             while True:
                 current_time = asyncio.get_event_loop().time()
                 
-                # Throttle frame rate to prevent overwhelming client
+                # Throttle frame rate
                 if last_frame_time > 0:
                     elapsed = current_time - last_frame_time
                     if elapsed < frame_interval:
@@ -622,7 +511,7 @@ async def stream_mjpeg(
                 if not ret or frame is None:
                     break
                 
-                # Encode frame at original resolution in thread pool
+                # Encode frame at original resolution
                 jpeg_bytes = await asyncio.to_thread(encode_frame_to_jpeg, frame)
                 if jpeg_bytes is None:
                     continue
@@ -655,6 +544,92 @@ async def stream_mjpeg(
     )
 
 
+@router.get("/{stream_id}/snapshot")
+async def get_snapshot(
+    stream_id: str,
+    service: StreamsService = Depends(get_streams_service)
+) -> Response:
+    """Get a single JPEG snapshot from the stream for dashboard thumbnails.
+    
+    Constitution Principle II: No video storage beyond live frames.
+    Returns current frame at full resolution.
+    
+    Args:
+        stream_id: UUID of stream to snapshot
+        service: Injected StreamsService instance
+        
+    Returns:
+        JPEG image response
+        
+    Raises:
+        HTTPException: 404 if not found, 400 if not running, 503 if frame unavailable
+    """
+    stream = await service.get_stream(stream_id)
+    if not stream:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Stream not found"
+        )
+    
+    if stream["status"] != "running":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stream not running. Start stream first."
+        )
+    
+    try:
+        # Get single frame with timeout
+        frame_data = await asyncio.wait_for(
+            service.get_frame(stream_id),
+            timeout=SNAPSHOT_TIMEOUT
+        )
+        
+        if frame_data is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Stream is not producing frames"
+            )
+        
+        ret, frame = frame_data
+        if not ret or frame is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Failed to capture frame"
+            )
+        
+        # Encode to JPEG in thread pool
+        jpeg_bytes = await asyncio.to_thread(encode_frame_to_jpeg, frame)
+        
+        if jpeg_bytes is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to encode frame as JPEG"
+            )
+        
+        return Response(
+            content=jpeg_bytes,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "no-cache, max-age=0",
+                "Pragma": "no-cache"
+            }
+        )
+        
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Snapshot timeout - stream may be stalled"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error capturing snapshot for {stream_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to capture snapshot"
+        )
+
+
 @router.get("/{stream_id}/scores")
 async def stream_scores_sse(
     stream_id: str,
@@ -662,19 +637,10 @@ async def stream_scores_sse(
 ) -> StreamingResponse:
     """SSE endpoint for real-time detection scores.
     
-    Provides Server-Sent Events stream with person detection scores
-    and bounding box coordinates. Currently returns placeholder data;
-    will be replaced with actual YOLO detection results.
+    Constitution Principle VII: Real-time scoring for home automation.
+    Currently returns placeholder data until YOLO + Shapely integration.
     
-    Args:
-        stream_id: UUID of stream to monitor
-        service: Injected StreamsService instance
-        
-    Returns:
-        StreamingResponse with text/event-stream content
-        
-    Raises:
-        HTTPException: 404 if not found, 400 if not running
+    TODO: Replace with actual YOLO person detection + polygon zone scoring.
     """
     stream = await service.get_stream(stream_id)
     if not stream:
@@ -702,10 +668,15 @@ async def stream_scores_sse(
                     break
                 
                 # TODO: Replace with actual YOLO + Shapely detection
+                # Constitution Principle VII: distance, coordinates, size scoring
                 score = {
-                    "distance": random.uniform(0, 1),
+                    "stream_id": stream_id,
+                    "zone_id": None,  # TODO: Add zone detection
+                    "object_class": "person",  # TODO: From YOLO
+                    "confidence": random.uniform(0.7, 0.99),
+                    "distance": random.uniform(0, 1),  # TODO: Calculate from target point
                     "coordinates": {"x": random.uniform(0, 1), "y": random.uniform(0, 1)},
-                    "size": random.randint(50, 200),
+                    "size": random.randint(50, 200),  # TODO: bbox width * height
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 
