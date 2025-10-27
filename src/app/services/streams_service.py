@@ -720,6 +720,10 @@ class StreamsService:
             '-rtsp_transport', 'tcp',
             '-rtsp_flags', 'prefer_tcp',
             '-max_delay', '500000',
+            '-analyzeduration', '1000000',
+            '-probesize', '1000000',
+            '-fflags', 'nobuffer',
+            '-flags', 'low_delay',
         ]
         
         # Add GPU-specific parameters if hardware acceleration enabled
