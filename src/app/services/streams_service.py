@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import subprocess
 import uuid
 from datetime import datetime, timezone
@@ -29,7 +28,7 @@ from typing import Any, Final
 
 from ..config_io import load_streams, save_streams, get_gpu_backend
 from ..models.stream import Stream
-from ..utils.validation import validate_rtsp_url as validate_rtsp_url_format, validate_fps
+from ..utils.validation import validate_rtsp_url as validate_rtsp_url_format
 from ..utils.strings import normalize_stream_name, mask_rtsp_credentials
 from ..utils.rtsp import probe_rtsp_stream, build_ffmpeg_command, validate_rtsp_url
 
@@ -45,12 +44,6 @@ DEFAULT_PROBE_TIMEOUT: Final[float] = 5.0
 
 STREAM_STOP_TIMEOUT: Final[float] = 5.0
 """Timeout in seconds for gracefully stopping FFmpeg process."""
-
-MIN_FPS: Final[int] = 1
-"""Minimum allowed target FPS for stream processing."""
-
-MAX_FPS: Final[int] = 30
-"""Maximum allowed target FPS for stream processing."""
 
 FRAME_READ_TIMEOUT: Final[float] = 2.0
 """Timeout in seconds for reading a single frame from FFmpeg."""
@@ -146,7 +139,6 @@ class StreamsService:
         rtsp_url: str,
         hw_accel_enabled: bool = True,
         ffmpeg_params: list[str] | None = None,
-        target_fps: int = 5,
         auto_start: bool = True
     ) -> dict:
         """Create a new stream with validation and optional auto-start.
@@ -188,18 +180,15 @@ class StreamsService:
         if not is_valid:
             raise ValueError(error_msg or "Invalid RTSP URL")
         
-        # Validate FPS
-        is_valid, error_msg = validate_fps(target_fps, MIN_FPS, MAX_FPS)
-        if not is_valid:
-            raise ValueError(error_msg or "Invalid FPS")
-        
         # Apply default FFmpeg params if none provided
         # This ensures GPU acceleration flags are included when user leaves field empty
         if not ffmpeg_params or len(ffmpeg_params) == 0:
             ffmpeg_params = self._get_default_ffmpeg_params(hw_accel_enabled)
             logger.info(f"Applying default FFmpeg params for {self.gpu_backend} backend")
+            logger.debug(f"Applied default FFmpeg params: {ffmpeg_params}")  # ADD THIS
         else:
             logger.info(f"Using custom FFmpeg params: {' '.join(ffmpeg_params)}")
+            logger.debug(f"Using custom FFmpeg params: {ffmpeg_params}")
         
         # Load existing config
         config = load_streams()
@@ -257,7 +246,6 @@ class StreamsService:
         status: str | None = None,
         hw_accel_enabled: bool | None = None,
         ffmpeg_params: list[str] | None = None,
-        target_fps: int | None = None,
         auto_start: bool | None = None
     ) -> dict | None:
         """Update a stream (partial update)."""
@@ -307,13 +295,6 @@ class StreamsService:
                 # User provided custom params
                 stream["ffmpeg_params"] = ffmpeg_params
                 logger.info(f"Applied custom FFmpeg params for stream {stream_id}")
-        
-        # Update target FPS
-        if target_fps is not None:
-            is_valid, error_msg = validate_fps(target_fps, MIN_FPS, MAX_FPS)
-            if not is_valid:
-                raise ValueError(error_msg or "Invalid FPS")
-            stream["target_fps"] = target_fps
         
         # Update auto-start
         if auto_start is not None:
@@ -491,13 +472,12 @@ class StreamsService:
             # Get parameters
             url = stream["rtsp_url"]
             params = stream.get("ffmpeg_params", [])
-            fps = stream.get("target_fps", 5)
             hw_accel = stream.get("hw_accel_enabled", False)
             
             # Validate
             if not validate_rtsp_url(url, params, self.gpu_backend):
                 raise ValueError("Invalid RTSP URL or FFmpeg params")
-            
+
             # Build command (FFmpeg pipes MJPEG to stdout)
             cmd = build_ffmpeg_command(
                 rtsp_url=url,
@@ -505,9 +485,14 @@ class StreamsService:
                 gpu_backend=self.gpu_backend if hw_accel else None
             )
             
+            # TEMPORARY DEBUG - Remove before commit
+            logger.debug(f"RTSP URL passed to FFmpeg: {url}")
+            logger.debug(f"Full FFmpeg command: {cmd}")
+
             logger.info(f"Starting FFmpeg for {stream_id}: {mask_rtsp_credentials(url)}")
             logger.debug(f"FFmpeg command: {' '.join(cmd)}")
-            
+            logger.debug(f"GPU backend: {self.gpu_backend}, HW accel: {hw_accel}")
+
             # Start subprocess with stdout pipe
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -515,6 +500,8 @@ class StreamsService:
                 stderr=subprocess.PIPE
             )
             
+            logger.debug(f"FFmpeg process started with PID: {process.pid}")
+
             # Wait a moment for process to initialize
             await asyncio.sleep(0.5)
             
@@ -529,7 +516,6 @@ class StreamsService:
             self.active_processes[stream_id] = {
                 "process": process,
                 "buffer": bytearray(),  # Buffer for parsing MJPEG frames
-                "fps": fps
             }
             
             # Update status in config

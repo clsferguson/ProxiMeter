@@ -69,6 +69,9 @@ def build_ffmpeg_command(
     """
     cmd = ["ffmpeg"]
     
+    logger.debug(f"Building FFmpeg command with GPU backend: {gpu_backend}")
+    logger.debug(f"User ffmpeg_params: {ffmpeg_params}")
+
     # Add user-provided parameters first (allows overriding defaults)
     cmd.extend(ffmpeg_params)
     
@@ -86,6 +89,8 @@ def build_ffmpeg_command(
         "-"                        # Output to stdout
     ])
     
+    logger.debug(f"Final FFmpeg command: {' '.join(cmd)}")
+
     return cmd
 
 

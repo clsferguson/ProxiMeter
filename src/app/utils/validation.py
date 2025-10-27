@@ -330,35 +330,6 @@ def validate_polygon_coordinates(
 
 
 # ============================================================================
-# FPS Validation
-# ============================================================================
-
-def validate_fps(fps: int | float, min_fps: float = 0.1, max_fps: float = 60.0) -> ValidationResult:
-    """Validate frames per second value.
-    
-    Args:
-        fps: FPS value to validate
-        min_fps: Minimum allowed FPS (default: 0.1)
-        max_fps: Maximum allowed FPS (default: 60.0)
-        
-    Returns:
-        Tuple of (is_valid, error_message)
-    """
-    try:
-        fps_float = float(fps)
-    except (TypeError, ValueError):
-        return False, "FPS must be a number"
-    
-    if not (float('-inf') < fps_float < float('inf')):
-        return False, "FPS is not a valid number"
-    
-    if not (min_fps <= fps_float <= max_fps):
-        return False, f"FPS must be between {min_fps} and {max_fps}"
-    
-    return True, None
-
-
-# ============================================================================
 # Utility Functions
 # ============================================================================
 
