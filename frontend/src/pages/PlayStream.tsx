@@ -53,7 +53,6 @@ export default function PlayStream() {
   
   const [scores, setScores] = useState<ScoreData | null>(null)
   const [imageError, setImageError] = useState(false)
-  const [imageKey, setImageKey] = useState(0)
 
   // ========================================================================
   // Derived State - Find Stream (No setState in Effect!)
@@ -117,23 +116,6 @@ useEffect(() => {
 
 
   // ========================================================================
-  // Image Reload
-  // ========================================================================
-  
-  /**
-   * Reload MJPEG image every 200ms (5fps).
-   * This ensures we get fresh frames from FFmpeg pipe.
-   */
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setImageKey(prev => prev + 1)
-      setImageError(false)
-    }, 200) // 5fps = 200ms per frame
-
-    return () => clearInterval(interval)
-  }, [])
-
-  // ========================================================================
   // Event Handlers
   // ========================================================================
   
@@ -144,6 +126,7 @@ useEffect(() => {
   const handleImageError = () => {
     setImageError(true)
   }
+
 
   // ========================================================================
   // Render: Loading State
@@ -175,6 +158,7 @@ useEffect(() => {
     )
   }
 
+
   // ========================================================================
   // Render: Error State
   // ========================================================================
@@ -202,6 +186,7 @@ useEffect(() => {
       </Layout>
     )
   }
+
 
   // ========================================================================
   // Render: Stream Not Found
@@ -231,11 +216,12 @@ useEffect(() => {
     )
   }
 
+
   // ========================================================================
   // Render: Stream Display
   // ========================================================================
   
-  const streamUrl = `/api/streams/${stream.id}/mjpeg?t=${imageKey}`
+ // const streamUrl = `/api/streams/${stream.id}/mjpeg?t=${imageKey}`
 
   return (
     <Layout>
@@ -281,23 +267,39 @@ useEffect(() => {
               </Alert>
             ) : (
               <div className="relative w-full bg-black rounded-lg overflow-hidden">
-                {/* Video display */}
+                {/* Video display - MJPEG multipart stream */}
                 <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
                   {!imageError ? (
                     <img
-                      src={streamUrl}
+                      src={`/api/streams/${stream.id}/mjpeg`}
                       alt={`${stream.name} live stream`}
                       className="absolute inset-0 w-full h-full object-contain"
                       onError={handleImageError}
+                      style={{
+                        imageRendering: 'auto',
+                      }}
                     />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/90">
                       <div className="text-center text-white">
                         <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                         <p className="text-lg font-semibold mb-2">Stream Unavailable</p>
-                        <p className="text-sm opacity-75">
-                          Check that the RTSP stream is accessible and FFmpeg is running
+                        <p className="text-sm opacity-75 max-w-md mx-auto">
+                          Cannot connect to stream. Verify:
+                          <br />• RTSP stream is accessible
+                          <br />• FFmpeg process is running
+                          <br />• Stream is started on dashboard
                         </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-4"
+                          onClick={() => {
+                            setImageError(false)
+                          }}
+                        >
+                          Retry Connection
+                        </Button>
                       </div>
                     </div>
                   )}
