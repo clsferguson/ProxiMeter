@@ -185,7 +185,7 @@ class StreamsService:
         if not ffmpeg_params or len(ffmpeg_params) == 0:
             ffmpeg_params = self._get_default_ffmpeg_params(hw_accel_enabled)
             logger.info(f"Applying default FFmpeg params for {self.gpu_backend} backend")
-            logger.debug(f"Applied default FFmpeg params: {ffmpeg_params}")  # ADD THIS
+            logger.debug(f"Applied default FFmpeg params: {ffmpeg_params}") 
         else:
             logger.info(f"Using custom FFmpeg params: {' '.join(ffmpeg_params)}")
             logger.debug(f"Using custom FFmpeg params: {ffmpeg_params}")
@@ -485,10 +485,6 @@ class StreamsService:
                 gpu_backend=self.gpu_backend if hw_accel else None
             )
             
-            # TEMPORARY DEBUG - Remove before commit
-            logger.debug(f"RTSP URL passed to FFmpeg: {url}")
-            logger.debug(f"Full FFmpeg command: {cmd}")
-
             logger.info(f"Starting FFmpeg for {stream_id}: {mask_rtsp_credentials(url)}")
             logger.debug(f"FFmpeg command: {' '.join(cmd)}")
             logger.debug(f"GPU backend: {self.gpu_backend}, HW accel: {hw_accel}")
@@ -503,19 +499,36 @@ class StreamsService:
             logger.debug(f"FFmpeg process started with PID: {process.pid}")
 
             # Wait a moment for process to initialize
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
             
-            # Check if process died
+            # Check if process died immediately
             if process.returncode is not None:
+                # Read ALL stderr output
                 stderr = await process.stderr.read() if process.stderr else b""
                 error_msg = stderr.decode().strip()
-                logger.error(f"FFmpeg died immediately for {stream_id}: {error_msg}")
-                raise RuntimeError(f"FFmpeg failed to start: {error_msg}")
+                
+                # Log the full FFmpeg error
+                logger.error(f"❌ FFmpeg died immediately for {stream_id}")
+                logger.error(f"FFmpeg return code: {process.returncode}")
+                logger.error(f"FFmpeg stderr output:\n{error_msg}")
+                
+                # Also print to console to bypass any logging filters
+                print(f"\n{'='*80}", flush=True)
+                print(f"❌ FFMPEG FAILED FOR STREAM: {stream_id}", flush=True)
+                print(f"Return Code: {process.returncode}", flush=True)
+                print(f"Error Output:", flush=True)
+                print(error_msg, flush=True)
+                print(f"{'='*80}\n", flush=True)
+                
+                raise RuntimeError(f"FFmpeg failed to start (code {process.returncode}): {error_msg}")
+            
+            # FFmpeg started successfully - create background task to monitor stderr
+            asyncio.create_task(self._monitor_ffmpeg_stderr(stream_id, process))
             
             # Store process info
             self.active_processes[stream_id] = {
                 "process": process,
-                "buffer": bytearray(),  # Buffer for parsing MJPEG frames
+                "buffer": bytearray(),
             }
             
             # Update status in config
@@ -528,7 +541,7 @@ class StreamsService:
             config["streams"] = streams
             save_streams(config)
             
-            logger.info(f"Successfully started stream {stream_id} (PID: {process.pid}, GPU: {self.gpu_backend})")
+            logger.info(f"✅ Successfully started stream {stream_id} (PID: {process.pid}, GPU: {self.gpu_backend})")
             return True
             
         except Exception as e:
@@ -730,3 +743,49 @@ class StreamsService:
                 ])
         
         return params
+    
+    async def _monitor_ffmpeg_stderr(self, stream_id: str, process: asyncio.subprocess.Process) -> None:
+        """Monitor FFmpeg stderr for errors and warnings.
+        
+        Runs as background task to continuously read and log FFmpeg output.
+        """
+        # Check if stderr is available
+        if process.stderr is None:
+            logger.warning(f"FFmpeg stderr not available for monitoring stream {stream_id}")
+            return
+        
+        try:
+            while process.returncode is None:
+                # Read stderr line by line
+                try:
+                    line = await asyncio.wait_for(
+                        process.stderr.readline(),
+                        timeout=1.0
+                    )
+                    
+                    if not line:
+                        break
+                    
+                    message = line.decode().strip()
+                    if not message:
+                        continue
+                    
+                    # Log FFmpeg messages at appropriate levels
+                    if 'error' in message.lower() or 'fatal' in message.lower():
+                        logger.error(f"FFmpeg [{stream_id}]: {message}")
+                    elif 'warning' in message.lower():
+                        logger.warning(f"FFmpeg [{stream_id}]: {message}")
+                    elif 'deprecated' in message.lower():
+                        logger.debug(f"FFmpeg [{stream_id}]: {message}")
+                    else:
+                        # Info/debug messages
+                        logger.debug(f"FFmpeg [{stream_id}]: {message}")
+                        
+                except asyncio.TimeoutError:
+                    # No output yet, continue monitoring
+                    continue
+                
+        except asyncio.CancelledError:
+            logger.debug(f"FFmpeg stderr monitor cancelled for {stream_id}")
+        except Exception as e:
+            logger.error(f"Error monitoring FFmpeg stderr for {stream_id}: {e}")
