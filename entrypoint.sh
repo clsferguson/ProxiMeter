@@ -28,16 +28,18 @@ if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         wget \
         gnupg2 \
-        ca-certificates
+        ca-certificates \
+        software-properties-common
     
-    # Add NVIDIA CUDA repository
-    wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/3bf863cc.pub | apt-key add - 2>/dev/null || true
-    echo "deb https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64 /" > /etc/apt/sources.list.d/cuda.list
+    # Install NVIDIA CUDA repository keyring package (official method)
+    wget -q https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
+    dpkg -i cuda-keyring_1.1-1_all.deb
+    rm cuda-keyring_1.1-1_all.deb
     
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         libnvcuvid1 \
-        libnvidia-encode1 || echo "⚠️  Could not install some NVIDIA libraries"
+        libnvidia-encode1 || echo "⚠️  Could not install some NVIDIA libraries (they may already be present from host GPU driver)"
     
     rm -rf /var/lib/apt/lists/*
     echo "✅ NVIDIA libraries installed"
