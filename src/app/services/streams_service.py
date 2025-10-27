@@ -718,7 +718,8 @@ class StreamsService:
             '-loglevel', 'warning',
             '-threads', '2',
             '-rtsp_transport', 'tcp',
-            '-stimeout', '5000000',
+            '-rtsp_flags', 'prefer_tcp',
+            '-max_delay', '500000',
         ]
         
         # Add GPU-specific parameters if hardware acceleration enabled
