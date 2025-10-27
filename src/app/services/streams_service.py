@@ -619,50 +619,58 @@ class StreamsService:
         buffer = proc_data["buffer"]
         
         try:
-            # Read chunk from stdout
-            chunk = await asyncio.wait_for(
-                process.stdout.read(4096),
-                timeout=FRAME_READ_TIMEOUT
-            )
+            # Keep reading until we have a complete frame
+            max_attempts = 50  # Prevent infinite loop
+            attempts = 0
             
-            if not chunk:
-                logger.warning(f"FFmpeg stdout closed for stream {stream_id}")
-                return None
+            while attempts < max_attempts:
+                attempts += 1
+                
+                # Check if we already have a complete frame in buffer
+                start_idx = buffer.find(JPEG_START_MARKER)
+                if start_idx != -1:
+                    end_idx = buffer.find(JPEG_END_MARKER, start_idx + 2)
+                    if end_idx != -1:
+                        # Extract complete JPEG frame
+                        jpeg_data = bytes(buffer[start_idx:end_idx + 2])
+                        
+                        # Remove processed data from buffer
+                        del buffer[:end_idx + 2]
+                        
+                        logger.debug(f"Extracted frame: {len(jpeg_data)} bytes")
+                        return (True, jpeg_data)
+                
+                # Need more data - read chunk from stdout
+                try:
+                    chunk = await asyncio.wait_for(
+                        process.stdout.read(8192),  # Increased chunk size
+                        timeout=0.5  # Shorter timeout for faster retries
+                    )
+                except asyncio.TimeoutError:
+                    # No data yet, continue trying
+                    continue
+                
+                if not chunk:
+                    logger.warning(f"FFmpeg stdout closed for stream {stream_id}")
+                    return None
+                
+                # Append to buffer
+                buffer.extend(chunk)
+                
+                # Prevent buffer from growing unbounded (10MB limit)
+                if len(buffer) > 10 * 1024 * 1024:
+                    logger.warning(f"Buffer overflow for stream {stream_id}, resetting")
+                    # Keep last 1MB of data
+                    buffer[:] = buffer[-1024*1024:]
             
-            # Append to buffer
-            buffer.extend(chunk)
-            
-            # Look for complete JPEG frame
-            start_idx = buffer.find(JPEG_START_MARKER)
-            if start_idx == -1:
-                # No start marker yet
-                return (False, b'')
-            
-            # Look for end marker after start
-            end_idx = buffer.find(JPEG_END_MARKER, start_idx + 2)
-            if end_idx == -1:
-                # Incomplete frame, keep buffering
-                return (False, b'')
-            
-            # Extract complete JPEG frame
-            jpeg_data = bytes(buffer[start_idx:end_idx + 2])
-            
-            # Remove processed data from buffer
-            del buffer[:end_idx + 2]
-            
-            # Prevent buffer from growing unbounded (5MB limit)
-            if len(buffer) > 5 * 1024 * 1024:
-                logger.warning(f"Buffer overflow for stream {stream_id}, resetting")
-                buffer.clear()
-            
-            return (True, jpeg_data)
-            
-        except asyncio.TimeoutError:
-            logger.debug(f"Frame read timeout for stream {stream_id}")
+            # Max attempts reached without finding frame
+            logger.warning(f"Failed to extract frame after {max_attempts} attempts for stream {stream_id}")
             return (False, b'')
+                
         except Exception as e:
-            logger.error(f"Error reading frame from stream {stream_id}: {e}")
+            logger.error(f"Error reading frame from stream {stream_id}: {e}", exc_info=True)
             return None
+
     
     # ========================================================================
     # Helper Methods

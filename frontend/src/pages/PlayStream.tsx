@@ -1,263 +1,392 @@
 /**
- * PlayStream Page - Full Screen Stream Viewer
+ * PlayStream Page - Live MJPEG Stream Viewer
  * 
- * Displays a live MJPEG stream at 5fps in a dedicated window.
- * Streams are always full resolution, fit to window size.
- * No audio, optimized for low bandwidth monitoring.
+ * User Story 4: Play Live Stream
+ * 
+ * Displays live MJPEG stream from backend in a contained card with:
+ * - Stream metadata display
+ * - Real-time detection scores overlay
+ * - Back navigation to dashboard
+ * - Error handling and loading states
+ * 
+ * Constitution-compliant: 5fps streaming, full resolution
  * 
  * @module pages/PlayStream
  */
 
-import { useParams } from 'react-router-dom'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import Layout from '@/components/Layout'
 import { Button } from '@/components/ui/button'
-import { AlertCircle, Maximize2, Minimize2, X } from 'lucide-react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Skeleton } from '@/components/ui/skeleton'
+import { Badge } from '@/components/ui/badge'
+import { AlertCircle, ArrowLeft, Activity, Video } from 'lucide-react'
+import { useStreams } from '@/hooks/useStreams'
+import type { StreamResponse } from '@/lib/types'
 
-type PlayerError = 'unavailable' | 'network' | null
+// ============================================================================
+// Types
+// ============================================================================
+
+interface ScoreData {
+  timestamp: string
+  distance?: number
+  coordinates?: { x: number; y: number }
+  size?: number
+}
+
+// ============================================================================
+// Main Component
+// ============================================================================
 
 /**
- * PlayStream Component
+ * PlayStream Page Component
  * 
- * Renders a full-window MJPEG stream viewer with manual frame parsing.
- * The stream is always 5fps, full resolution, no audio.
- * FFmpeg transcoding happens automatically on the backend.
+ * Displays live MJPEG stream in a contained card layout with metadata.
+ * Stream loads at 5fps per constitution requirements.
  */
 export default function PlayStream() {
   const { streamId } = useParams<{ streamId: string }>()
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<PlayerError>(null)
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const abortControllerRef = useRef<AbortController | null>(null)
+  const navigate = useNavigate()
+  const { streams, isLoading, error } = useStreams()
+  
+  const [scores, setScores] = useState<ScoreData | null>(null)
+  const [imageError, setImageError] = useState(false)
+  const [imageKey, setImageKey] = useState(0)
 
-  const mjpegUrl = `/api/streams/${streamId}/mjpeg`
-
-  // ============================================================================
-  // MJPEG Stream Processing
-  // ============================================================================
-
-  useEffect(() => {
-    let active = true
-    abortControllerRef.current = new AbortController()
-
-    const findJPEGStart = (buffer: Uint8Array): number => {
-      for (let i = 0; i < buffer.length - 1; i++) {
-        if (buffer[i] === 0xFF && buffer[i + 1] === 0xD8) {
-          return i
-        }
-      }
-      return -1
+  // ========================================================================
+  // Derived State - Find Stream (No setState in Effect!)
+  // ========================================================================
+  
+  /**
+   * Find the current stream from the streams list using useMemo.
+   * This avoids calling setState inside an effect, which can cause
+   * cascading renders and performance issues.
+   */
+  const stream = useMemo<StreamResponse | null>(() => {
+    if (!streamId || streams.length === 0) {
+      return null
     }
+    return streams.find(s => s.id === streamId) || null
+  }, [streamId, streams])
 
-    const findJPEGEnd = (buffer: Uint8Array): number => {
-      for (let i = 0; i < buffer.length - 1; i++) {
-        if (buffer[i] === 0xFF && buffer[i + 1] === 0xD9) {
-          return i
-        }
-      }
-      return -1
-    }
+// ========================================================================
+// SSE Score Streaming
+// ========================================================================
 
-    const startStream = async () => {
+/**
+ * Subscribe to Server-Sent Events for real-time detection scores.
+ * Only connects when stream exists and is running.
+ * 
+ * Uses stream object directly in dependencies to avoid optional chaining.
+ */
+useEffect(() => {
+  // Early return if no stream or not running
+  if (!stream || stream.status !== 'running') {
+    return
+  }
+
+  let eventSource: EventSource | null = null
+
+  try {
+    eventSource = new EventSource(`/api/streams/${stream.id}/scores`)
+    
+    eventSource.onmessage = (event) => {
       try {
-        setIsLoading(true)
-        setError(null)
-
-        const response = await fetch(mjpegUrl, {
-          signal: abortControllerRef.current?.signal
-        })
-        
-        if (!response.ok) {
-          throw new Error('Stream unavailable')
-        }
-        
-        if (!response.body) {
-          throw new Error('No response body')
-        }
-
-        setIsLoading(false)
-
-        const reader = response.body.getReader()
-        let buffer = new Uint8Array(0)
-
-        const canvas = canvasRef.current
-        if (!canvas) return
-
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return
-
-        while (active) {
-          const { done, value } = await reader.read()
-          
-          if (done) {
-            console.log('MJPEG stream ended')
-            break
-          }
-
-          const newBuffer = new Uint8Array(buffer.length + value.length)
-          newBuffer.set(buffer)
-          newBuffer.set(value, buffer.length)
-          buffer = newBuffer
-
-          const startIdx = findJPEGStart(buffer)
-          const endIdx = findJPEGEnd(buffer)
-
-          if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-            const jpegData = buffer.slice(startIdx, endIdx + 2)
-            buffer = buffer.slice(endIdx + 2)
-
-            const blob = new Blob([jpegData], { type: 'image/jpeg' })
-            const imgUrl = URL.createObjectURL(blob)
-            
-            const img = new Image()
-            img.onload = () => {
-              // Set canvas to full resolution, CSS will handle fit-to-window
-              canvas.width = img.width
-              canvas.height = img.height
-              ctx.drawImage(img, 0, 0)
-              URL.revokeObjectURL(imgUrl)
-            }
-            img.onerror = () => {
-              URL.revokeObjectURL(imgUrl)
-              console.error('Failed to decode JPEG frame')
-            }
-            img.src = imgUrl
-          }
-
-          if (buffer.length > 5 * 1024 * 1024) {
-            console.warn('Buffer overflow, resetting')
-            buffer = new Uint8Array(0)
-          }
-        }
-      } catch (err: unknown) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          console.log('Stream fetch aborted')
-          return
-        }
-        
-        console.error('Stream error:', err)
-        if (active) {
-          setError('network')
-          setIsLoading(false)
-        }
+        const data = JSON.parse(event.data) as ScoreData
+        setScores(data)
+      } catch (err) {
+        console.error('Failed to parse score data:', err)
       }
     }
-
-    startStream()
-
-    return () => {
-      active = false
-      abortControllerRef.current?.abort()
+    
+    eventSource.onerror = (err) => {
+      console.error('SSE error:', err)
+      eventSource?.close()
     }
-  }, [mjpegUrl, streamId])
+    
+  } catch (err) {
+    console.error('Failed to create EventSource:', err)
+  }
 
-  // ============================================================================
+  return () => {
+    eventSource?.close()
+  }
+}, [stream])
+
+
+  // ========================================================================
+  // Image Reload
+  // ========================================================================
+  
+  /**
+   * Reload MJPEG image every 200ms (5fps).
+   * This ensures we get fresh frames from FFmpeg pipe.
+   */
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setImageKey(prev => prev + 1)
+      setImageError(false)
+    }, 200) // 5fps = 200ms per frame
+
+    return () => clearInterval(interval)
+  }, [])
+
+  // ========================================================================
   // Event Handlers
-  // ============================================================================
-
-  const handleFullscreen = async () => {
-    if (!containerRef.current) return
-
-    try {
-      if (!isFullscreen) {
-        await containerRef.current.requestFullscreen()
-        setIsFullscreen(true)
-      } else {
-        await document.exitFullscreen()
-        setIsFullscreen(false)
-      }
-    } catch (err) {
-      console.error('Fullscreen error:', err)
-    }
+  // ========================================================================
+  
+  const handleBack = () => {
+    navigate('/')
   }
 
-  const handleClose = () => {
-    window.close()
+  const handleImageError = () => {
+    setImageError(true)
   }
 
-  const handleRetry = () => {
-    window.location.reload()
+  // ========================================================================
+  // Render: Loading State
+  // ========================================================================
+  
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="container mx-auto p-6 max-w-7xl">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleBack}
+            className="mb-6"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
+          </Button>
+          <Card>
+            <CardContent className="py-12">
+              <div className="text-center">
+                <Activity className="h-8 w-8 mx-auto mb-4 text-muted-foreground animate-pulse" />
+                <p className="text-muted-foreground">Loading stream...</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </Layout>
+    )
   }
 
-  // ============================================================================
-  // Render
-  // ============================================================================
+  // ========================================================================
+  // Render: Error State
+  // ========================================================================
+  
+  if (error) {
+    return (
+      <Layout>
+        <div className="container mx-auto p-6 max-w-7xl">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleBack}
+            className="mb-6"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
+          </Button>
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Failed to load stream: {error}
+            </AlertDescription>
+          </Alert>
+        </div>
+      </Layout>
+    )
+  }
+
+  // ========================================================================
+  // Render: Stream Not Found
+  // ========================================================================
+  
+  if (!stream) {
+    return (
+      <Layout>
+        <div className="container mx-auto p-6 max-w-7xl">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleBack}
+            className="mb-6"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
+          </Button>
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Stream not found. It may have been deleted.
+            </AlertDescription>
+          </Alert>
+        </div>
+      </Layout>
+    )
+  }
+
+  // ========================================================================
+  // Render: Stream Display
+  // ========================================================================
+  
+  const streamUrl = `/api/streams/${stream.id}/mjpeg?t=${imageKey}`
 
   return (
-    <div 
-      ref={containerRef} 
-      className="relative w-screen h-screen bg-black flex flex-col"
-    >
-      {/* Control bar */}
-      <div className="absolute top-0 left-0 right-0 bg-black/80 backdrop-blur-sm p-2 flex items-center justify-between z-10 opacity-0 hover:opacity-100 transition-opacity">
-        <div className="text-white text-sm font-mono">
-          Stream: {streamId} | 5fps Full Resolution
-        </div>
-        <div className="flex items-center gap-2">
+    <Layout>
+      <div className="container mx-auto p-6 max-w-7xl">
+        
+        {/* Header with back button */}
+        <div className="flex items-center gap-4 mb-6">
           <Button
-            size="sm"
             variant="ghost"
-            onClick={handleFullscreen}
-            className="text-white hover:bg-white/20"
-            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-          >
-            {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          </Button>
-          <Button
             size="sm"
-            variant="ghost"
-            onClick={handleClose}
-            className="text-white hover:bg-white/20"
-            title="Close window"
+            onClick={handleBack}
           >
-            <X className="h-4 w-4" />
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
           </Button>
-        </div>
-      </div>
-
-      {/* Main content area */}
-      <div className="flex-1 flex items-center justify-center">
-        {/* Loading state */}
-        {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
-            <div className="text-center">
-              <Skeleton className="h-12 w-12 rounded-full mx-auto mb-4 bg-slate-700" />
-              <p className="text-white text-sm">Loading stream...</p>
-              <p className="text-slate-400 text-xs mt-1">
-                Connecting to 5fps MJPEG stream...
-              </p>
-            </div>
+          <div className="flex-1">
+            <h1 className="text-2xl font-bold">{stream.name}</h1>
+            <p className="text-sm text-muted-foreground">Live Stream (5 FPS)</p>
           </div>
-        )}
+          <Badge variant={stream.status === 'running' ? 'default' : 'secondary'}>
+            {stream.status === 'running' ? 'Running' : 'Stopped'}
+          </Badge>
+        </div>
 
-        {/* Error state */}
-        {error && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
-            <div className="text-center max-w-sm">
-              <Alert variant="destructive" className="mb-4">
+        {/* Main stream card */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Video className="h-5 w-5" />
+              Live View
+            </CardTitle>
+            <CardDescription>
+              Real-time MJPEG stream at 5 FPS, full resolution
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {stream.status !== 'running' ? (
+              <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  {error === 'network' && 'Network error. Stream may not be running.'}
-                  {error === 'unavailable' && 'Stream unavailable. Check configuration.'}
+                  Stream is not running. Start the stream from the dashboard to view live video.
                 </AlertDescription>
               </Alert>
-              <Button onClick={handleRetry} variant="outline" size="sm">
-                Retry
-              </Button>
-            </div>
-          </div>
-        )}
+            ) : (
+              <div className="relative w-full bg-black rounded-lg overflow-hidden">
+                {/* Video display */}
+                <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+                  {!imageError ? (
+                    <img
+                      src={streamUrl}
+                      alt={`${stream.name} live stream`}
+                      className="absolute inset-0 w-full h-full object-contain"
+                      onError={handleImageError}
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/90">
+                      <div className="text-center text-white">
+                        <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                        <p className="text-lg font-semibold mb-2">Stream Unavailable</p>
+                        <p className="text-sm opacity-75">
+                          Check that the RTSP stream is accessible and FFmpeg is running
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-        {/* Canvas for full resolution MJPEG at 5fps */}
-        <canvas
-          ref={canvasRef}
-          className="max-w-full max-h-full object-contain"
-          style={{ width: '100%', height: '100%' }}
-        />
+                {/* Scores overlay */}
+                {scores && !imageError && (
+                  <div className="absolute bottom-4 left-4 right-4">
+                    <div className="bg-black/70 backdrop-blur-sm text-white px-4 py-2 rounded-lg border border-white/20">
+                      <div className="flex flex-wrap gap-4 text-sm font-mono">
+                        {scores.distance !== undefined && (
+                          <span>Distance: {scores.distance.toFixed(2)}</span>
+                        )}
+                        {scores.coordinates && (
+                          <span>
+                            Position: ({scores.coordinates.x.toFixed(2)}, {scores.coordinates.y.toFixed(2)})
+                          </span>
+                        )}
+                        {scores.size !== undefined && (
+                          <span>Size: {scores.size}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Stream metadata grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Stream Details</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="space-y-3 text-sm">
+                <div className="flex justify-between items-center">
+                  <dt className="text-muted-foreground">Name</dt>
+                  <dd className="font-medium">{stream.name}</dd>
+                </div>
+                <div className="flex justify-between items-center">
+                  <dt className="text-muted-foreground">Status</dt>
+                  <dd>
+                    <Badge variant={stream.status === 'running' ? 'default' : 'secondary'}>
+                      {stream.status}
+                    </Badge>
+                  </dd>
+                </div>
+                <div className="flex justify-between items-center">
+                  <dt className="text-muted-foreground">GPU Acceleration</dt>
+                  <dd className="font-medium">
+                    {stream.hw_accel_enabled ? 'Enabled' : 'Disabled'}
+                  </dd>
+                </div>
+                <div className="flex justify-between items-center">
+                  <dt className="text-muted-foreground">Auto Start</dt>
+                  <dd className="font-medium">
+                    {stream.auto_start ? 'Enabled' : 'Disabled'}
+                  </dd>
+                </div>
+              </dl>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Playback Info</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <p>
+                  <strong className="text-foreground">Frame Rate:</strong> 5 FPS (constitution-mandated cap)
+                </p>
+                <p>
+                  <strong className="text-foreground">Resolution:</strong> Original (no scaling)
+                </p>
+                <p>
+                  <strong className="text-foreground">Format:</strong> MJPEG over HTTP
+                </p>
+                <p className="text-xs pt-2">
+                  If playback fails, verify the RTSP stream is accessible and the backend FFmpeg process is running.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
-    </div>
+    </Layout>
   )
 }
