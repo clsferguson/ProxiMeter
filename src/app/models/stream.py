@@ -73,16 +73,6 @@ class Stream(BaseModel):
         )
     ]
     
-    target_fps: Annotated[
-        int,
-        Field(
-            default=5,
-            ge=1,
-            le=30,
-            description="Target frames per second for processing"
-        )
-    ]
-    
     auto_start: Annotated[
         bool,
         Field(
@@ -177,16 +167,6 @@ class NewStream(BaseModel):
         )
     ]
     
-    target_fps: Annotated[
-        int,
-        Field(
-            default=5,
-            ge=1,
-            le=30,
-            description="Target frames per second for processing"
-        )
-    ]
-    
     auto_start: Annotated[
         bool,
         Field(
@@ -263,16 +243,6 @@ class EditStream(BaseModel):
         Field(
             default=None,
             description="Custom FFmpeg parameters (empty uses service defaults)"
-        )
-    ]
-    
-    target_fps: Annotated[
-        int | None,
-        Field(
-            default=None,
-            ge=1,
-            le=30,
-            description="Target frames per second for processing"
         )
     ]
     

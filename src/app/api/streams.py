@@ -105,7 +105,6 @@ async def validate_stream_config(
     build_ffmpeg_command(
         rtsp_url=rtsp_url,
         ffmpeg_params=params,
-        target_fps=5,
         gpu_backend=gpu_backend
     )
 
@@ -229,7 +228,6 @@ async def create_stream(
             rtsp_url=new_stream.rtsp_url,
             hw_accel_enabled=new_stream.hw_accel_enabled,
             ffmpeg_params=new_stream.ffmpeg_params,
-            target_fps=new_stream.target_fps,
             auto_start=new_stream.auto_start
         )
         
@@ -344,7 +342,6 @@ async def update_stream(
             status=edit_stream.status,
             hw_accel_enabled=edit_stream.hw_accel_enabled,
             ffmpeg_params=edit_stream.ffmpeg_params,
-            target_fps=edit_stream.target_fps,
             auto_start=edit_stream.auto_start
         )
         

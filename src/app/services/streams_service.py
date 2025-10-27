@@ -223,8 +223,7 @@ class StreamsService:
             name=name,
             rtsp_url=rtsp_url,
             hw_accel_enabled=hw_accel_enabled,
-            ffmpeg_params=ffmpeg_params,  # Now guaranteed to have defaults or user values
-            target_fps=target_fps,
+            ffmpeg_params=ffmpeg_params,
             auto_start=auto_start,
             created_at=datetime.now(timezone.utc).isoformat(),
             order=len(streams),
@@ -503,7 +502,6 @@ class StreamsService:
             cmd = build_ffmpeg_command(
                 rtsp_url=url,
                 ffmpeg_params=params,
-                target_fps=fps,
                 gpu_backend=self.gpu_backend if hw_accel else None
             )
             

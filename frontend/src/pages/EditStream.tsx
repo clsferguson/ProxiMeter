@@ -34,7 +34,6 @@ interface StreamFormData {
   rtsp_url: string
   hw_accel_enabled: boolean
   ffmpeg_params: string | string[]
-  target_fps: number
 }
 
 export default function EditStream() {
@@ -72,7 +71,6 @@ export default function EditStream() {
         name: data.name,
         rtsp_url: data.rtsp_url,
         hw_accel_enabled: data.hw_accel_enabled,
-        target_fps: data.target_fps,
         ffmpeg_params: typeof data.ffmpeg_params === 'string' 
           ? data.ffmpeg_params.split(' ').filter(Boolean) 
           : data.ffmpeg_params

@@ -38,7 +38,6 @@ GPU_FFMPEG_FLAGS: Final[set[str]] = {"-hwaccel", "-hwaccel_output_format", "-c:v
 def build_ffmpeg_command(
     rtsp_url: str,
     ffmpeg_params: list[str],
-    target_fps: int,
     gpu_backend: str | None = None
 ) -> list[str]:
     """Build FFmpeg command for RTSP stream processing with GPU acceleration.
@@ -55,7 +54,6 @@ def build_ffmpeg_command(
     Args:
         rtsp_url: RTSP URL to process
         ffmpeg_params: User-provided FFmpeg parameters (already validated)
-        target_fps: Target frames per second (1-30)
         gpu_backend: GPU backend (nvidia, amd, intel, or None for CPU)
         
     Returns:
@@ -65,7 +63,6 @@ def build_ffmpeg_command(
         >>> cmd = build_ffmpeg_command(
         ...     "rtsp://cam/stream",
         ...     ["-rtsp_transport", "tcp"],
-        ...     5,
         ...     "nvidia"
         ... )
         >>> # Run with: subprocess.run(cmd, stdout=subprocess.PIPE)
@@ -79,7 +76,7 @@ def build_ffmpeg_command(
     cmd.extend(["-i", rtsp_url])
     
     # Force FPS output
-    cmd.extend(["-r", str(target_fps)])
+    cmd.extend(["-r", "5"])
     
     # Output configuration: MJPEG to stdout
     cmd.extend([

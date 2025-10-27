@@ -15,7 +15,6 @@ export interface StreamResponse {
   rtsp_url: string;
   hw_accel_enabled: boolean;
   ffmpeg_params: string[];
-  target_fps: number;
   auto_start: boolean;  // NEW: Auto-start on creation/reboot
   created_at: string;
   order: number;
@@ -30,7 +29,6 @@ export interface NewStreamRequest {
   rtsp_url: string;
   hw_accel_enabled?: boolean;
   ffmpeg_params?: string[];
-  target_fps?: number;
   auto_start?: boolean;  // NEW: Auto-start on creation/reboot (default: true)
 }
 
@@ -43,7 +41,6 @@ export interface EditStreamRequest {
   rtsp_url?: string;
   hw_accel_enabled?: boolean;
   ffmpeg_params?: string[];
-  target_fps?: number;
   auto_start?: boolean;  // NEW: Update auto-start setting
 }
 
