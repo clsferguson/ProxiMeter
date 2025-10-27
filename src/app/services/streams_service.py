@@ -157,7 +157,7 @@ class StreamsService:
             name: Display name for stream (1-50 characters)
             rtsp_url: RTSP URL to stream source
             hw_accel_enabled: Whether to use GPU hardware acceleration
-            ffmpeg_params: Optional additional FFmpeg parameters
+            ffmpeg_params: Optional additional FFmpeg parameters (defaults applied if None/empty)
             target_fps: Target frame rate for processing (1-30)
             auto_start: Whether to automatically start stream on creation
             
@@ -193,6 +193,14 @@ class StreamsService:
         if not is_valid:
             raise ValueError(error_msg or "Invalid FPS")
         
+        # Apply default FFmpeg params if none provided
+        # This ensures GPU acceleration flags are included when user leaves field empty
+        if not ffmpeg_params or len(ffmpeg_params) == 0:
+            ffmpeg_params = self._get_default_ffmpeg_params(hw_accel_enabled)
+            logger.info(f"Applying default FFmpeg params for {self.gpu_backend} backend")
+        else:
+            logger.info(f"Using custom FFmpeg params: {' '.join(ffmpeg_params)}")
+        
         # Load existing config
         config = load_streams()
         streams = config.get("streams", [])
@@ -215,7 +223,7 @@ class StreamsService:
             name=name,
             rtsp_url=rtsp_url,
             hw_accel_enabled=hw_accel_enabled,
-            ffmpeg_params=ffmpeg_params if ffmpeg_params is not None else [],
+            ffmpeg_params=ffmpeg_params,  # Now guaranteed to have defaults or user values
             target_fps=target_fps,
             auto_start=auto_start,
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -289,9 +297,17 @@ class StreamsService:
                 raise RuntimeError("Hardware acceleration unavailable (no GPU detected)")
             stream["hw_accel_enabled"] = hw_accel_enabled
         
-        # Update FFmpeg params
+        # Update FFmpeg params - apply defaults if explicitly set to empty
         if ffmpeg_params is not None:
-            stream["ffmpeg_params"] = ffmpeg_params
+            if len(ffmpeg_params) == 0:
+                # User cleared the field - apply defaults
+                hw_accel = stream.get("hw_accel_enabled", True)
+                stream["ffmpeg_params"] = self._get_default_ffmpeg_params(hw_accel)
+                logger.info(f"Applied default FFmpeg params for stream {stream_id}")
+            else:
+                # User provided custom params
+                stream["ffmpeg_params"] = ffmpeg_params
+                logger.info(f"Applied custom FFmpeg params for stream {stream_id}")
         
         # Update target FPS
         if target_fps is not None:
@@ -321,6 +337,7 @@ class StreamsService:
         
         logger.info(f"Updated stream {stream_id}")
         return stream
+
     
     # ========================================================================
     # Stream Deletion
@@ -677,3 +694,47 @@ class StreamsService:
                 raise ValueError(
                     f"Stream name '{name}' already exists (case-insensitive)"
                 )
+
+    def _get_default_ffmpeg_params(self, hw_accel_enabled: bool) -> list[str]:
+        """Get default FFmpeg parameters based on GPU backend.
+        
+        Applies GPU-specific hardware acceleration flags if enabled.
+        These defaults match the frontend placeholder text.
+        
+        Args:
+            hw_accel_enabled: Whether to include GPU acceleration flags
+            
+        Returns:
+            List of FFmpeg parameter strings
+        """
+        # Base parameters (always applied)
+        params = [
+            '-hide_banner',
+            '-loglevel', 'warning',
+            '-threads', '2',
+            '-rtsp_transport', 'tcp',
+            '-timeout', '10000000',
+        ]
+        
+        # Add GPU-specific parameters if hardware acceleration enabled
+        if hw_accel_enabled and self.gpu_backend != "none":
+            if self.gpu_backend == "nvidia":
+                params.extend([
+                    '-hwaccel', 'cuda',
+                    '-hwaccel_output_format', 'cuda',
+                    '-c:v', 'h264_cuvid',
+                ])
+            elif self.gpu_backend == "amd":
+                params.extend([
+                    '-hwaccel', 'vaapi',
+                    '-hwaccel_device', '/dev/dri/renderD128',
+                    '-c:v', 'h264',
+                ])
+            elif self.gpu_backend == "intel":
+                params.extend([
+                    '-hwaccel', 'qsv',
+                    '-hwaccel_device', '/dev/dri/renderD128',
+                    '-c:v', 'h264_qsv',
+                ])
+        
+        return params

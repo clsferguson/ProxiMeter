@@ -275,7 +275,7 @@ async def get_stream(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get stream"
         )
-
+    
 
 @router.patch("/{stream_id}")
 @router.put("/{stream_id}")
@@ -284,7 +284,10 @@ async def update_stream(
     edit_stream: EditStream,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Update an existing stream (partial update)."""
+    """Update an existing stream (partial update).
+    
+    Auto-restarts stream if FFmpeg params or RTSP URL changes while running.
+    """
     try:
         # Get current stream
         current_stream = await service.get_stream(stream_id)
@@ -293,6 +296,33 @@ async def update_stream(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Stream {stream_id} not found"
             )
+        
+        # Track if restart needed
+        needs_restart = False
+        was_running = current_stream["status"] == "running"
+        
+        # Check if critical params changed
+        if was_running:
+            if edit_stream.rtsp_url and edit_stream.rtsp_url != current_stream["rtsp_url"]:
+                needs_restart = True
+                logger.info(f"RTSP URL changed for {stream_id}, will restart")
+            
+            if edit_stream.ffmpeg_params is not None:
+                current_params = set(current_stream.get("ffmpeg_params", []))
+                new_params = set(edit_stream.ffmpeg_params)
+                if current_params != new_params:
+                    needs_restart = True
+                    logger.info(f"FFmpeg params changed for {stream_id}, will restart")
+            
+            if edit_stream.hw_accel_enabled is not None:
+                if edit_stream.hw_accel_enabled != current_stream.get("hw_accel_enabled"):
+                    needs_restart = True
+                    logger.info(f"Hardware acceleration changed for {stream_id}, will restart")
+        
+        # Stop stream if restart needed
+        if needs_restart:
+            logger.info(f"Stopping stream {stream_id} for parameter update")
+            await service.stop_stream(stream_id)
         
         # Re-validate if URL or params changed
         if edit_stream.rtsp_url is not None or edit_stream.ffmpeg_params is not None:
@@ -323,6 +353,14 @@ async def update_stream(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Stream {stream_id} not found"
             )
+        
+        # Restart stream if it was running and params changed
+        if needs_restart:
+            logger.info(f"Restarting stream {stream_id} with new parameters")
+            success = await service.start_stream(stream_id, updated_stream)
+            if not success:
+                logger.error(f"Failed to restart stream {stream_id}")
+                # Don't fail the update, just log the error
         
         return mask_stream_response(updated_stream)
     except RuntimeError as e:
@@ -483,7 +521,7 @@ async def stream_mjpeg(
     if stream["status"] != "running":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Stream must be started before viewing. Use POST /{stream_id}/start first."
+            detail="Stream must be started before viewing."
         )
     
     fps = stream.get("target_fps", 5)
@@ -505,15 +543,13 @@ async def stream_mjpeg(
                 
                 frame_data = await service.get_frame(stream_id)
                 if frame_data is None:
+                    logger.warning(f"Stream {stream_id} ended")
                     break
                 
-                ret, frame = frame_data
-                if not ret or frame is None:
-                    break
-                
-                # Encode frame at original resolution
-                jpeg_bytes = await asyncio.to_thread(encode_frame_to_jpeg, frame)
-                if jpeg_bytes is None:
+                success, jpeg_bytes = frame_data
+                if not success or not jpeg_bytes:
+                    # No frame ready yet, wait a bit
+                    await asyncio.sleep(0.1)
                     continue
                 
                 # Yield MJPEG multipart frame
@@ -578,32 +614,31 @@ async def get_snapshot(
         )
     
     try:
-        # Get single frame with timeout
-        frame_data = await asyncio.wait_for(
-            service.get_frame(stream_id),
-            timeout=SNAPSHOT_TIMEOUT
-        )
+        # Get single frame with timeout - retry up to 3 times
+        max_retries = 3
+        jpeg_bytes = None
         
-        if frame_data is None:
+        for attempt in range(max_retries):
+            frame_data = await asyncio.wait_for(
+                service.get_frame(stream_id),
+                timeout=SNAPSHOT_TIMEOUT
+            )
+            
+            if frame_data is None:
+                continue
+            
+            success, frame_bytes = frame_data
+            if success and frame_bytes:
+                jpeg_bytes = frame_bytes
+                break
+            
+            # Wait a bit before retry
+            await asyncio.sleep(0.2)
+        
+        if not jpeg_bytes:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Stream is not producing frames"
-            )
-        
-        ret, frame = frame_data
-        if not ret or frame is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Failed to capture frame"
-            )
-        
-        # Encode to JPEG in thread pool
-        jpeg_bytes = await asyncio.to_thread(encode_frame_to_jpeg, frame)
-        
-        if jpeg_bytes is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to encode frame as JPEG"
+                detail="Failed to capture frame after retries"
             )
         
         return Response(

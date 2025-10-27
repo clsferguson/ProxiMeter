@@ -184,7 +184,7 @@ export default function StreamCard({ stream, scores, onDelete }: StreamCardProps
               {displayUrl}
             </CardDescription>
           </div>
-          <div className="flex-shrink-0">
+          <div className="shrink-0">
             {getStatusBadge(stream.status)}
           </div>
         </div>
@@ -257,17 +257,18 @@ export default function StreamCard({ stream, scores, onDelete }: StreamCardProps
         {/* Action buttons */}
         <div className="flex flex-col gap-2 pt-2">
           <div className="flex gap-2">
-            {/* Play button - opens in new window */}
-            <Button 
-              size="sm" 
-              className="flex-1" 
-              variant="default"
-              onClick={() => window.open(`/play/${stream.id}`, '_blank', 'width=1280,height=720')}
-              title="Open stream in new window"
-            >
-              <Play className="h-4 w-4 mr-1" />
-              Play
-            </Button>
+            {/* Play button - navigates to full screen view */}
+            <Link to={`/play/${stream.id}`} className="flex-1">
+              <Button 
+                size="sm" 
+                className="w-full" 
+                variant="default"
+                title="View stream in full screen"
+              >
+                <Play className="h-4 w-4 mr-1" />
+                Play
+              </Button>
+            </Link>
 
             {/* Edit button */}
             <Link to={`/edit/${stream.id}`} className="flex-1">

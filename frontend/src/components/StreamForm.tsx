@@ -1,34 +1,20 @@
 /**
- * StreamForm Component - Reusable form for adding and editing streams
+ * StreamForm Component - Add/Edit Stream Configuration
  * 
- * Composes shadcn/ui primitives: Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage,
- * Card, CardContent, CardDescription, CardHeader, CardTitle, Alert, AlertDescription, Button, Input
+ * Constitution-compliant stream configuration form with GPU-aware defaults.
  * 
- * User Stories 2 & 3: Add/Edit Stream forms
+ * Constitution Compliance:
+ * - Principle II: 5fps hardcoded, auto-start always enabled
+ * - Principle III: GPU backend detection and hardware acceleration
  * 
  * Features:
+ * - GPU-aware FFmpeg parameter defaults
  * - Client-side validation using react-hook-form + zod
- * - Real-time error display via shadcn/ui FormMessage
- * - Loading state during submission with disabled button
- * - Cancel button to return to dashboard
- * - Accessible form with proper labels and descriptions
- * - Responsive layout using Tailwind CSS
+ * - Centralized FFmpeg defaults (not hardcoded in component)
+ * - Real-time error display
+ * - Accessible form with proper ARIA labels
  * 
- * @component
- * @param {StreamFormProps} props - Component props
- * @param {StreamResponse} [props.initialValues] - Initial values for edit mode, undefined for add mode
- * @param {Function} props.onSubmit - Callback when form is submitted successfully
- * @param {boolean} [props.isLoading=false] - Whether the form is currently submitting
- * @param {string|null} [props.error=null] - Error message to display
- * @param {string} [props.submitLabel="Add Stream"] - Submit button label
- * @param {boolean} [props.isEdit=false] - Whether this is an edit form
- * @returns {JSX.Element} Rendered form
- * 
- * @example
- * <StreamForm
- *   onSubmit={handleSubmit}
- *   submitLabel="Add Stream"
- * />
+ * @module components/StreamForm
  */
 
 import { useEffect, useState } from 'react'
@@ -39,8 +25,8 @@ import * as z from 'zod'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
 import {
   Form,
   FormControl,
@@ -52,41 +38,123 @@ import {
 } from '@/components/ui/form'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Loader2 } from 'lucide-react'
 import { getGpuBackend } from '@/hooks/useApi'
 
 import type { StreamResponse } from '@/lib/types'
-import { VALIDATION } from '@/lib/constants'
+
+// ============================================================================
+// FFmpeg Default Parameters by GPU Backend
+// ============================================================================
 
 /**
- * Validation schema for stream form
- * Matches spec requirements for stream creation/editing
+ * Base FFmpeg parameters used for all streams regardless of GPU backend.
+ * These control basic stream behavior, logging, and reliability.
+ * 
+ * Constitution Principle II: FFmpeg handles all RTSP processing.
+ */
+const BASE_FFMPEG_PARAMS = [
+  '-hide_banner',           // Suppress FFmpeg banner output in logs
+  '-loglevel', 'warning',   // Only show warnings and errors (reduces log noise)
+  '-threads', '2',          // Limit CPU threads to 2 (efficiency for GPU-accelerated workload)
+  '-rtsp_transport', 'tcp', // Use TCP instead of UDP for reliability
+  '-timeout', '10000000',   // 10 second timeout for network operations (10M microseconds)
+] as const
+
+/**
+ * GPU-specific hardware acceleration parameters.
+ * Applied based on detected GPU backend from entrypoint.sh via GPU_BACKEND_DETECTED env var.
+ * 
+ * Constitution Principle III: GPU backend contract enforcement.
+ * 
+ * NVIDIA: Uses CUDA with NVDEC hardware decoder
+ * AMD: Uses VAAPI (Video Acceleration API)
+ * Intel: Uses Quick Sync Video (QSV)
+ */
+const GPU_FFMPEG_PARAMS = {
+  nvidia: [
+    '-hwaccel', 'cuda',                    // Enable NVIDIA CUDA acceleration
+    '-hwaccel_output_format', 'cuda',      // Keep decoded frames in GPU memory
+    '-c:v', 'h264_cuvid',                  // Use CUDA video decoder (NVDEC)
+  ],
+  amd: [
+    '-hwaccel', 'vaapi',                   // Enable AMD VAAPI acceleration
+    '-hwaccel_device', '/dev/dri/renderD128', // AMD GPU device path
+    '-c:v', 'h264',                        // Standard H.264 decoder with VAAPI
+  ],
+  intel: [
+    '-hwaccel', 'qsv',                     // Enable Intel Quick Sync Video
+    '-hwaccel_device', '/dev/dri/renderD128', // Intel GPU device path
+    '-c:v', 'h264_qsv',                    // Intel QSV H.264 decoder
+  ],
+  none: [] as string[],                    // No hardware acceleration (CPU only - not recommended)
+} as const
+
+/**
+ * Builds complete FFmpeg parameter string based on detected GPU backend.
+ * 
+ * This is the single source of truth for default FFmpeg parameters.
+ * Parameters are concatenated and used as placeholder in the form.
+ * 
+ * @param gpuBackend - Detected GPU backend (nvidia, amd, intel, none)
+ * @returns Space-separated FFmpeg parameter string
+ * 
+ * @example
+ * buildDefaultFFmpegParams('nvidia')
+ * // Returns: "-hide_banner -loglevel warning ... -hwaccel cuda -hwaccel_output_format cuda -c:v h264_cuvid"
+ */
+function buildDefaultFFmpegParams(gpuBackend: string): string {
+  const gpuParams = GPU_FFMPEG_PARAMS[gpuBackend as keyof typeof GPU_FFMPEG_PARAMS] || []
+  return [...BASE_FFMPEG_PARAMS, ...gpuParams].join(' ')
+}
+
+// ============================================================================
+// Validation Schema
+// ============================================================================
+
+/**
+ * Zod validation schema for stream form.
+ * 
+ * Constitution-compliant validation:
+ * - Name: 1-50 characters
+ * - RTSP URL: Must start with rtsp:// or rtsps://
+ * - Hardware acceleration: Boolean (default true)
+ * - FFmpeg params: Optional string (defaults applied on backend if empty)
+ * 
+ * Note: auto_start and target_fps are hardcoded on backend per constitution.
  */
 const streamFormSchema = z.object({
   name: z
     .string()
     .min(1, 'Stream name is required')
-    .max(100, 'Stream name must be at most 100 characters'),
+    .max(50, 'Stream name must be 50 characters or less'),
+  
   rtsp_url: z
     .string()
     .min(1, 'RTSP URL is required')
-    .refine(
-      (url) => url.startsWith(VALIDATION.RTSP_URL_PREFIX),
-      `Invalid RTSP URL format. Expected ${VALIDATION.RTSP_URL_PREFIX}...`
+    .regex(
+      /^rtsps?:\/\/.+/i,
+      'Must be a valid RTSP URL (rtsp:// or rtsps://)'
     ),
+  
   hw_accel_enabled: z.boolean(),
-  ffmpeg_params: z.string(),
-  target_fps: z.number().min(1).max(30),
+  
+  ffmpeg_params: z.string().optional(),
 })
 
 type StreamFormData = z.infer<typeof streamFormSchema>
 
 /**
- * Type for the transformed submission data with ffmpeg_params as string array
+ * Transformed submission data with ffmpeg_params as string array.
+ * Backend expects array format, form uses string for easier editing.
  */
 type StreamSubmitData = Omit<StreamFormData, 'ffmpeg_params'> & {
   ffmpeg_params: string[]
 }
+
+// ============================================================================
+// Component Props
+// ============================================================================
 
 interface StreamFormProps {
   /** Initial values for edit mode, undefined for add mode */
@@ -99,19 +167,19 @@ interface StreamFormProps {
   error?: string | null
   /** Submit button label (default: "Add Stream") */
   submitLabel?: string
-  /** Whether this is an edit form */
+  /** Whether this is an edit form (affects title and descriptions) */
   isEdit?: boolean
 }
 
+// ============================================================================
+// Main Component
+// ============================================================================
+
 /**
- * StreamForm component - reusable form for adding/editing streams
+ * StreamForm Component
  * 
- * Features:
- * - Client-side validation with zod
- * - Real-time error display
- * - Loading state during submission
- * - Cancel button to return to dashboard
- * - Accessible form with proper labels and descriptions
+ * Auto-start is always true per constitution (continuous monitoring).
+ * Target FPS is hardcoded to 5fps on backend per Principle II.
  */
 export function StreamForm({
   initialValues,
@@ -122,10 +190,19 @@ export function StreamForm({
   isEdit = false,
 }: StreamFormProps) {
   const navigate = useNavigate()
+  
+  // ========================================================================
+  // State Management
+  // ========================================================================
+  
   const [submitError, setSubmitError] = useState<string | null>(error)
-  const [gpuBackend, setGpuBackend] = useState('none')
-  const [paramsPlaceholder, setParamsPlaceholder] = useState('')
-
+  const [gpuBackend, setGpuBackend] = useState<string>('none')
+  const [isLoadingGpu, setIsLoadingGpu] = useState(true)
+  
+  // ========================================================================
+  // Form Initialization
+  // ========================================================================
+  
   const form = useForm<StreamFormData>({
     resolver: zodResolver(streamFormSchema),
     defaultValues: {
@@ -133,69 +210,148 @@ export function StreamForm({
       rtsp_url: initialValues?.rtsp_url ?? '',
       hw_accel_enabled: initialValues?.hw_accel_enabled ?? true,
       ffmpeg_params: initialValues?.ffmpeg_params?.join(' ') ?? '',
-      target_fps: initialValues?.target_fps ?? 5,
     },
     mode: 'onBlur', // Validate on blur for better UX
   })
-
+  
+  // ========================================================================
+  // GPU Backend Detection
+  // ========================================================================
+  
+  /**
+   * Fetch GPU backend on mount to determine default FFmpeg parameters.
+   * 
+   * Calls /api/streams/gpu-backend which returns GPU_BACKEND_DETECTED
+   * env var set by entrypoint.sh during container startup.
+   * 
+   * Constitution Principle III: Explicit GPU backend contract.
+   */
   useEffect(() => {
-    getGpuBackend()
-      .then(data => {
-        setGpuBackend(data.gpu_backend)
-        let placeholder = '-hide_banner -loglevel warning -threads 2 -rtsp_transport tcp -timeout 10000000'
-        if (data.gpu_backend === 'nvidia') {
-          placeholder += ' -hwaccel cuda -hwaccel_output_format cuda -c:v h264_cuvid'
-        } else if (data.gpu_backend === 'amd') {
-          placeholder += ' -hwaccel amf -c:v h264_amf'
-        } else if (data.gpu_backend === 'intel') {
-          placeholder += ' -hwaccel qsv -c:v h264_qsv'
+    let mounted = true
+    
+    const fetchGpuBackend = async () => {
+      try {
+        const data = await getGpuBackend()
+        
+        if (!mounted) return
+        
+        setGpuBackend(data.gpu_backend || 'none')
+        
+        // Log GPU status for debugging
+        if (data.gpu_backend === 'none') {
+          console.warn('No GPU detected - hardware acceleration unavailable')
+        } else {
+          console.info(`GPU backend detected: ${data.gpu_backend}`)
         }
-        setParamsPlaceholder(placeholder)
-      })
-      .catch(() => setGpuBackend('none'))
+        
+      } catch (err) {
+        console.error('Failed to fetch GPU backend:', err)
+        if (mounted) {
+          setGpuBackend('none')
+        }
+      } finally {
+        if (mounted) {
+          setIsLoadingGpu(false)
+        }
+      }
+    }
+    
+    fetchGpuBackend()
+    
+    return () => {
+      mounted = false
+    }
   }, [])
-
+  
+  // ========================================================================
+  // Event Handlers
+  // ========================================================================
+  
+  /**
+   * Handle form submission with data transformation.
+   * 
+   * Transforms ffmpeg_params from space-separated string to array.
+   * If empty, backend will apply defaults based on GPU backend.
+   */
   const handleSubmit = async (data: StreamFormData) => {
     try {
       setSubmitError(null)
-      // Transform ffmpeg_params string to array with proper typing
+      
+      // Transform ffmpeg_params string to array
+      // Backend will apply defaults if empty
+      const ffmpegParamsArray: string[] = data.ffmpeg_params
+        ? data.ffmpeg_params.split(' ').filter(param => param.trim() !== '')
+        : []
+      
       const transformedData: StreamSubmitData = {
         ...data,
-        ffmpeg_params: data.ffmpeg_params ? data.ffmpeg_params.split(' ').filter(Boolean) : []
+        ffmpeg_params: ffmpegParamsArray,
       }
+      
       await onSubmit(transformedData)
-      // Navigation happens in parent component after successful submission
+      // Navigation handled by parent component after successful submission
+      
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save stream'
       setSubmitError(errorMessage)
       console.error('Form submission error:', err)
     }
   }
-
+  
+  /**
+   * Handle cancel button - navigate back to dashboard.
+   */
   const handleCancel = () => {
     navigate('/')
   }
-
+  
+  // ========================================================================
+  // Computed Values
+  // ========================================================================
+  
+  // Generate placeholder text based on detected GPU backend
+  const ffmpegPlaceholder = isLoadingGpu 
+    ? 'Loading GPU backend...'
+    : buildDefaultFFmpegParams(gpuBackend)
+  
+  // ========================================================================
+  // Render
+  // ========================================================================
+  
   return (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
         <CardTitle>{isEdit ? 'Edit Stream' : 'Add New Stream'}</CardTitle>
         <CardDescription>
           {isEdit
-            ? 'Update the stream configuration below'
-            : 'Configure a new RTSP stream for monitoring'}
+            ? 'Update stream configuration (will require manual restart if FFmpeg params changed)'
+            : 'Configure a new RTSP stream (5fps, full resolution, auto-start enabled)'}
         </CardDescription>
       </CardHeader>
+      
       <CardContent>
+        {/* Error Display */}
         {submitError && (
           <Alert variant="destructive" className="mb-6">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{submitError}</AlertDescription>
           </Alert>
         )}
-
+        
+        {/* GPU Backend Warning */}
+        {!isLoadingGpu && gpuBackend === 'none' && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              <strong>No GPU detected.</strong> Hardware acceleration is unavailable.
+              This application requires a GPU (NVIDIA/AMD/Intel) for operation.
+            </AlertDescription>
+          </Alert>
+        )}
+        
         <Form {...form}>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+            
             {/* Stream Name Field */}
             <FormField
               control={form.control}
@@ -211,13 +367,13 @@ export function StreamForm({
                     />
                   </FormControl>
                   <FormDescription>
-                    A descriptive name for this stream (max 100 characters)
+                    A descriptive name for this camera stream (1-50 characters)
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
-
+            
             {/* RTSP URL Field */}
             <FormField
               control={form.control}
@@ -227,21 +383,20 @@ export function StreamForm({
                   <FormLabel>RTSP URL</FormLabel>
                   <FormControl>
                     <Input
-                      placeholder="rtsp://username:password@host:port/path"
+                      placeholder="rtsp://username:password@192.168.1.100:554/stream"
+                      type="url"
                       disabled={isLoading}
                       {...field}
                     />
                   </FormControl>
                   <FormDescription>
-                    The RTSP stream URL (must start with rtsp://)
-                    <br />
-                    Note: Future zone coordinates will be normalized (0-1) relative to stream resolution for consistency.
+                    Complete RTSP URL including credentials. Stream processes at 5fps automatically.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
-
+            
             {/* Hardware Acceleration Switch */}
             <FormField
               control={form.control}
@@ -253,79 +408,55 @@ export function StreamForm({
                       Hardware Acceleration
                     </FormLabel>
                     <FormDescription>
-                      Enable GPU acceleration if available ({gpuBackend})
+                      Use GPU for stream decoding ({gpuBackend !== 'none' ? `${gpuBackend} detected` : 'no GPU detected'})
                     </FormDescription>
                   </div>
                   <FormControl>
                     <Switch
                       checked={field.value}
                       onCheckedChange={field.onChange}
-                      disabled={isLoading}
+                      disabled={isLoading || gpuBackend === 'none'}
                     />
                   </FormControl>
                 </FormItem>
               )}
             />
-
+            
             {/* FFmpeg Parameters Field */}
             <FormField
               control={form.control}
               name="ffmpeg_params"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>FFmpeg Parameters</FormLabel>
+                  <FormLabel>FFmpeg Parameters (Optional)</FormLabel>
                   <FormControl>
                     <Textarea
-                      placeholder={paramsPlaceholder}
-                      disabled={isLoading}
+                      placeholder={ffmpegPlaceholder}
+                      disabled={isLoading || isLoadingGpu}
+                      rows={4}
+                      className="font-mono text-sm"
                       {...field}
                     />
                   </FormControl>
                   <FormDescription>
-                    Space-separated FFmpeg flags (defaults shown; edit for custom)
+                    Space-separated FFmpeg flags. Leave empty to use GPU backend defaults shown above.
+                    {isEdit && ' Note: Changing params requires stopping and restarting the stream.'}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
-
-            {/* Target FPS Field */}
-            <FormField
-              control={form.control}
-              name="target_fps"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Target FPS</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={30}
-                      placeholder="5"
-                      disabled={isLoading}
-                      {...field}
-                      onChange={(e) => field.onChange(parseInt(e.target.value) || 5)}
-                      value={field.value}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    Frames per second (1-30, default 5)
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
+            
             {/* Form Actions */}
             <div className="flex gap-3 pt-4">
               <Button
                 type="submit"
-                disabled={isLoading}
+                disabled={isLoading || isLoadingGpu}
                 className="flex-1"
               >
                 {isLoading ? (
                   <>
-                    <span className="mr-2">⏳</span>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     {isEdit ? 'Saving...' : 'Adding...'}
                   </>
                 ) : (
