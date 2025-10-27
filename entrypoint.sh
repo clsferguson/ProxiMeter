@@ -28,8 +28,7 @@ if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         wget \
         gnupg2 \
-        ca-certificates \
-        software-properties-common
+        ca-certificates
     
     # Install NVIDIA CUDA repository keyring package (official method)
     wget -q https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
