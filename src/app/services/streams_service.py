@@ -611,16 +611,24 @@ class StreamsService:
             Tuple of (success, jpeg_bytes) if frame available, None otherwise
         """
         if stream_id not in self.active_processes:
+            logger.warning(f"Stream {stream_id} not in active_processes")
             return None
         
         proc_data = self.active_processes[stream_id]
         process = proc_data["process"]
         buffer = proc_data["buffer"]
         
+        # Check if process is still alive
+        if process.returncode is not None:
+            logger.error(f"FFmpeg process for {stream_id} has died (returncode: {process.returncode})")
+            return None
+        
         try:
             # Keep reading until we have a complete frame
-            max_attempts = 50  # Prevent infinite loop
+            max_attempts = 50
             attempts = 0
+            
+            logger.debug(f"[{stream_id}] Starting frame extraction, buffer size: {len(buffer)}")
             
             while attempts < max_attempts:
                 attempts += 1
@@ -636,38 +644,39 @@ class StreamsService:
                         # Remove processed data from buffer
                         del buffer[:end_idx + 2]
                         
-                        logger.debug(f"Extracted frame: {len(jpeg_data)} bytes")
+                        logger.info(f"[{stream_id}] ✅ Extracted frame: {len(jpeg_data)} bytes")
                         return (True, jpeg_data)
                 
                 # Need more data - read chunk from stdout
                 try:
                     chunk = await asyncio.wait_for(
-                        process.stdout.read(8192),  # Increased chunk size
-                        timeout=0.5  # Shorter timeout for faster retries
+                        process.stdout.read(8192),
+                        timeout=2.0  # Increased timeout
                     )
                 except asyncio.TimeoutError:
-                    # No data yet, continue trying
+                    logger.warning(f"[{stream_id}] Timeout reading from FFmpeg stdout (attempt {attempts}/{max_attempts})")
                     continue
                 
                 if not chunk:
-                    logger.warning(f"FFmpeg stdout closed for stream {stream_id}")
+                    logger.error(f"[{stream_id}] FFmpeg stdout closed (no data)")
                     return None
                 
                 # Append to buffer
                 buffer.extend(chunk)
+                logger.debug(f"[{stream_id}] Read {len(chunk)} bytes, buffer now {len(buffer)} bytes")
                 
                 # Prevent buffer from growing unbounded (10MB limit)
                 if len(buffer) > 10 * 1024 * 1024:
-                    logger.warning(f"Buffer overflow for stream {stream_id}, resetting")
-                    # Keep last 1MB of data
+                    logger.warning(f"[{stream_id}] Buffer overflow, resetting")
                     buffer[:] = buffer[-1024*1024:]
             
-            # Max attempts reached without finding frame
-            logger.warning(f"Failed to extract frame after {max_attempts} attempts for stream {stream_id}")
+            # Max attempts reached
+            logger.error(f"[{stream_id}] Failed to extract frame after {max_attempts} attempts")
+            logger.debug(f"[{stream_id}] Buffer preview (first 100 bytes): {buffer[:100].hex()}")
             return (False, b'')
                 
         except Exception as e:
-            logger.error(f"Error reading frame from stream {stream_id}: {e}", exc_info=True)
+            logger.error(f"[{stream_id}] Error reading frame: {e}", exc_info=True)
             return None
 
     
