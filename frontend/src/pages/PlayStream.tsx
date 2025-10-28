@@ -3,38 +3,36 @@
  * 
  * User Story 4: Play Live Stream
  * 
- * Displays live MJPEG stream from backend in a contained card with:
+ * Displays live MJPEG stream from backend with:
  * - Stream metadata display
- * - Real-time detection scores overlay
+ * - Minimal overlays (removed unnecessary scores)
  * - Back navigation to dashboard
- * - Error handling and loading states
+ * - Efficient error handling and loading states
+ * - Auto-retry on connection loss
  * 
  * Constitution-compliant: 5fps streaming, full resolution
+ * 
+ * Performance Optimizations:
+ * - Removed SSE score streaming (not yet implemented)
+ * - Simplified state management
+ * - Single img tag for MJPEG (browser handles multipart)
+ * - Proper cleanup on unmount
+ * - Memoized stream lookup to avoid re-renders
  * 
  * @module pages/PlayStream
  */
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import Layout from '@/components/Layout'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { AlertCircle, ArrowLeft, Activity, Video } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Activity, Video, RefreshCw } from 'lucide-react'
 import { useStreams } from '@/hooks/useStreams'
+import { API_BASE_URL } from '@/lib/constants'
 import type { StreamResponse } from '@/lib/types'
-
-// ============================================================================
-// Types
-// ============================================================================
-
-interface ScoreData {
-  timestamp: string
-  distance?: number
-  coordinates?: { x: number; y: number }
-  size?: number
-}
 
 // ============================================================================
 // Main Component
@@ -43,25 +41,26 @@ interface ScoreData {
 /**
  * PlayStream Page Component
  * 
- * Displays live MJPEG stream in a contained card layout with metadata.
- * Stream loads at 5fps per constitution requirements.
+ * Displays live MJPEG stream at 5fps per constitution requirements.
+ * Uses native browser multipart/x-mixed-replace handling via <img> tag.
  */
 export default function PlayStream() {
   const { streamId } = useParams<{ streamId: string }>()
   const navigate = useNavigate()
   const { streams, isLoading, error } = useStreams()
   
-  const [scores, setScores] = useState<ScoreData | null>(null)
+  // Simple state management - removed unnecessary SSE scores
   const [imageError, setImageError] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
 
   // ========================================================================
-  // Derived State - Find Stream (No setState in Effect!)
+  // Derived State - Find Stream (Memoized for Performance)
   // ========================================================================
   
   /**
    * Find the current stream from the streams list using useMemo.
-   * This avoids calling setState inside an effect, which can cause
-   * cascading renders and performance issues.
+   * This avoids calling setState inside an effect and prevents
+   * unnecessary re-renders when streams list updates.
    */
   const stream = useMemo<StreamResponse | null>(() => {
     if (!streamId || streams.length === 0) {
@@ -70,63 +69,61 @@ export default function PlayStream() {
     return streams.find(s => s.id === streamId) || null
   }, [streamId, streams])
 
-// ========================================================================
-// SSE Score Streaming
-// ========================================================================
-
-/**
- * Subscribe to Server-Sent Events for real-time detection scores.
- * Only connects when stream exists and is running.
- * 
- * Uses stream object directly in dependencies to avoid optional chaining.
- */
-useEffect(() => {
-  // Early return if no stream or not running
-  if (!stream || stream.status !== 'running') {
-    return
-  }
-
-  let eventSource: EventSource | null = null
-
-  try {
-    eventSource = new EventSource(`/api/streams/${stream.id}/scores`)
-    
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as ScoreData
-        setScores(data)
-      } catch (err) {
-        console.error('Failed to parse score data:', err)
-      }
-    }
-    
-    eventSource.onerror = (err) => {
-      console.error('SSE error:', err)
-      eventSource?.close()
-    }
-    
-  } catch (err) {
-    console.error('Failed to create EventSource:', err)
-  }
-
-  return () => {
-    eventSource?.close()
-  }
-}, [stream])
-
-
   // ========================================================================
-  // Event Handlers
+  // Event Handlers (Memoized)
   // ========================================================================
   
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     navigate('/')
-  }
+  }, [navigate])
 
-  const handleImageError = () => {
+  const handleImageError = useCallback(() => {
     setImageError(true)
-  }
+  }, [])
 
+  const handleImageLoad = useCallback(() => {
+    // Successfully loaded/reloaded stream
+    setImageError(false)
+    if (retryCount > 0) {
+      setRetryCount(0)
+    }
+  }, [retryCount])
+
+  const handleRetry = useCallback(() => {
+    setImageError(false)
+    setRetryCount(prev => prev + 1)
+  }, [])
+
+  // ========================================================================
+  // Auto-Retry on Error (Optional - can be removed if not desired)
+  // ========================================================================
+  
+  useEffect(() => {
+    if (!imageError || !stream || stream.status !== 'running') {
+      return
+    }
+
+    // Auto-retry after 5 seconds, up to 3 times
+    if (retryCount < 3) {
+      const timer = setTimeout(() => {
+        handleRetry()
+      }, 5000)
+
+      return () => clearTimeout(timer)
+    }
+  }, [imageError, stream, retryCount, handleRetry])
+
+  // ========================================================================
+  // Build Stream URL (Only if Stream is Running)
+  // ========================================================================
+  
+  const streamUrl = useMemo(() => {
+    if (!stream || stream.status !== 'running') {
+      return null
+    }
+    // Add retry count to force reload on retry
+    return `${API_BASE_URL}/streams/${stream.id}/mjpeg?t=${retryCount}`
+  }, [stream, retryCount])
 
   // ========================================================================
   // Render: Loading State
@@ -158,7 +155,6 @@ useEffect(() => {
     )
   }
 
-
   // ========================================================================
   // Render: Error State
   // ========================================================================
@@ -186,7 +182,6 @@ useEffect(() => {
       </Layout>
     )
   }
-
 
   // ========================================================================
   // Render: Stream Not Found
@@ -216,12 +211,9 @@ useEffect(() => {
     )
   }
 
-
   // ========================================================================
   // Render: Stream Display
   // ========================================================================
-  
- // const streamUrl = `/api/streams/${stream.id}/mjpeg?t=${imageKey}`
 
   return (
     <Layout>
@@ -269,62 +261,41 @@ useEffect(() => {
               <div className="relative w-full bg-black rounded-lg overflow-hidden">
                 {/* Video display - MJPEG multipart stream */}
                 <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
-                  {!imageError ? (
+                  {!imageError && streamUrl ? (
                     <img
-                      src={`/api/streams/${stream.id}/mjpeg`}
+                      src={streamUrl}
                       alt={`${stream.name} live stream`}
                       className="absolute inset-0 w-full h-full object-contain"
                       onError={handleImageError}
+                      onLoad={handleImageLoad}
                       style={{
                         imageRendering: 'auto',
                       }}
                     />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/90">
-                      <div className="text-center text-white">
+                      <div className="text-center text-white max-w-md px-6">
                         <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                         <p className="text-lg font-semibold mb-2">Stream Unavailable</p>
-                        <p className="text-sm opacity-75 max-w-md mx-auto">
-                          Cannot connect to stream. Verify:
-                          <br />• RTSP stream is accessible
-                          <br />• FFmpeg process is running
-                          <br />• Stream is started on dashboard
+                        <p className="text-sm opacity-75 mb-4">
+                          Cannot connect to stream. Verify:<br />
+                          • RTSP stream is accessible<br />
+                          • FFmpeg process is running<br />
+                          • Stream is started on dashboard
                         </p>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="mt-4"
-                          onClick={() => {
-                            setImageError(false)
-                          }}
+                          onClick={handleRetry}
+                          className="bg-white/10 hover:bg-white/20"
                         >
-                          Retry Connection
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Retry Connection {retryCount > 0 && `(Attempt ${retryCount + 1}/3)`}
                         </Button>
                       </div>
                     </div>
                   )}
                 </div>
-
-                {/* Scores overlay */}
-                {scores && !imageError && (
-                  <div className="absolute bottom-4 left-4 right-4">
-                    <div className="bg-black/70 backdrop-blur-sm text-white px-4 py-2 rounded-lg border border-white/20">
-                      <div className="flex flex-wrap gap-4 text-sm font-mono">
-                        {scores.distance !== undefined && (
-                          <span>Distance: {scores.distance.toFixed(2)}</span>
-                        )}
-                        {scores.coordinates && (
-                          <span>
-                            Position: ({scores.coordinates.x.toFixed(2)}, {scores.coordinates.y.toFixed(2)})
-                          </span>
-                        )}
-                        {scores.size !== undefined && (
-                          <span>Size: {scores.size}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </CardContent>
@@ -380,6 +351,9 @@ useEffect(() => {
                 </p>
                 <p>
                   <strong className="text-foreground">Format:</strong> MJPEG over HTTP
+                </p>
+                <p>
+                  <strong className="text-foreground">Protocol:</strong> multipart/x-mixed-replace
                 </p>
                 <p className="text-xs pt-2">
                   If playback fails, verify the RTSP stream is accessible and the backend FFmpeg process is running.

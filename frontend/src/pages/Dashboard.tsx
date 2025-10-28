@@ -63,7 +63,6 @@ export default function Dashboard() {
   // Get streams data from centralized hook with 2-second polling
   const { 
     streams, 
-    scores, 
     isLoading, 
     error, 
     refetch, 
@@ -196,7 +195,6 @@ export default function Dashboard() {
               <StreamCard 
                 key={stream.id} 
                 stream={stream}
-                scores={scores[stream.id]}
                 onDelete={handleDeleteClick}
               />
             ))}

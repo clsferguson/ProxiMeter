@@ -1,7 +1,8 @@
 /**
  * StreamCard Component - Stream Thumbnail Display
  * 
- * Displays stream information with a single JPEG snapshot preview.
+ * Displays stream information with a single static JPEG snapshot preview.
+ * Snapshot only refreshes when user manually clicks the refresh button.
  * Click "Play" to open full streaming view in new window.
  * 
  * @module components/StreamCard
@@ -15,23 +16,15 @@ import { Edit2, Play, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw } from
 import type { StreamResponse } from '@/lib/types'
 import { truncateText, maskRtspUrl } from '@/lib/utils'
 import { API_BASE_URL } from '@/lib/constants'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import type { ReactElement } from 'react'
 
 // ============================================================================
 // Type Definitions
 // ============================================================================
 
-interface ScoreData {
-  distance?: number
-  coordinates?: { x: number; y: number }
-  size?: number
-  [key: string]: unknown
-}
-
 interface StreamCardProps {
   stream: StreamResponse
-  scores?: ScoreData
   onDelete?: (streamId: string) => void
 }
 
@@ -68,63 +61,34 @@ function getStatusBadge(status: string): ReactElement {
   )
 }
 
-function formatScoresText(scores: ScoreData): string {
-  const parts: string[] = []
-
-  if (scores.distance !== undefined) {
-    parts.push(`Dist: ${scores.distance.toFixed(2)}`)
-  }
-
-  if (scores.coordinates) {
-    const x = scores.coordinates.x?.toFixed(2) ?? '0.00'
-    const y = scores.coordinates.y?.toFixed(2) ?? '0.00'
-    parts.push(`Pos: (${x}, ${y})`)
-  }
-
-  if (scores.size !== undefined) {
-    parts.push(`Size: ${scores.size}`)
-  }
-
-  return parts.join(' | ') || 'No data'
-}
-
 // ============================================================================
 // Main Component
 // ============================================================================
 
 /**
- * StreamCard Component - Snapshot Preview Only
+ * StreamCard Component - Static Snapshot Preview
  * 
- * Shows a single JPEG snapshot that refreshes periodically.
- * The snapshot endpoint provides the latest frame from the MJPEG stream.
+ * Shows a single JPEG snapshot that only refreshes on manual user action.
+ * No auto-refresh timer, no overlays - just a simple static preview.
  * 
  * @example
  * ```
  * <StreamCard 
  *   stream={stream} 
- *   scores={scores[stream.id]}
  *   onDelete={handleDelete}
  * />
  * ```
  */
-export default function StreamCard({ stream, scores, onDelete }: StreamCardProps) {
+export default function StreamCard({ stream, onDelete }: StreamCardProps) {
   
   // ============================================================================
   // State Management
   // ============================================================================
   
+  // Cache-busting key for snapshot URL - only increments on manual refresh
   const [snapshotKey, setSnapshotKey] = useState(0)
   const [imageError, setImageError] = useState(false)
-
-  // Refresh snapshot every 5 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setSnapshotKey(prev => prev + 1)
-      setImageError(false)
-    }, 5000)
-
-    return () => clearInterval(interval)
-  }, [])
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   // ============================================================================
   // Data Preparation
@@ -139,7 +103,7 @@ export default function StreamCard({ stream, scores, onDelete }: StreamCardProps
     day: 'numeric'
   })
 
-  // Snapshot URL with cache-busting key - FIXED: Use API_BASE_URL
+  // Snapshot URL with cache-busting key - using API_BASE_URL
   const snapshotUrl = `${API_BASE_URL}/streams/${stream.id}/snapshot?t=${snapshotKey}`
 
   // ============================================================================
@@ -152,13 +116,27 @@ export default function StreamCard({ stream, scores, onDelete }: StreamCardProps
     }
   }
 
-  const handleRefreshSnapshot = () => {
-    setSnapshotKey(prev => prev + 1)
+  const handleRefreshSnapshot = async () => {
+    // Set loading state
+    setIsRefreshing(true)
     setImageError(false)
+    
+    // Increment key to fetch new snapshot
+    setSnapshotKey(prev => prev + 1)
+    
+    // Clear loading state after a brief delay
+    setTimeout(() => {
+      setIsRefreshing(false)
+    }, 500)
   }
 
   const handleImageError = () => {
     setImageError(true)
+    setIsRefreshing(false)
+  }
+
+  const handleImageLoad = () => {
+    setIsRefreshing(false)
   }
 
   // ============================================================================
@@ -206,7 +184,7 @@ export default function StreamCard({ stream, scores, onDelete }: StreamCardProps
           </div>
         </div>
 
-        {/* Snapshot preview with scores overlay */}
+        {/* Static snapshot preview - no auto-refresh, no overlays */}
         <div className="relative w-full aspect-video bg-black rounded-md overflow-hidden">
           {!imageError ? (
             <>
@@ -215,41 +193,49 @@ export default function StreamCard({ stream, scores, onDelete }: StreamCardProps
                 alt={`${stream.name} snapshot`}
                 className="w-full h-full object-contain"
                 onError={handleImageError}
+                onLoad={handleImageLoad}
               />
               
-              {/* Scores overlay */}
-              {scores && (
-                <div className="absolute top-2 left-2 right-2 pointer-events-none">
-                  <div className="bg-black/70 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-md border border-white/20 font-mono">
-                    {formatScoresText(scores)}
-                  </div>
-                </div>
-              )}
-
-              {/* Refresh indicator */}
+              {/* Manual refresh button - bottom right corner */}
               <Button
                 size="sm"
                 variant="ghost"
                 className="absolute bottom-2 right-2 h-8 w-8 p-0 bg-black/50 hover:bg-black/70 text-white"
                 onClick={handleRefreshSnapshot}
+                disabled={isRefreshing || stream.status !== 'running'}
                 title="Refresh snapshot"
               >
-                <RefreshCw className="h-4 w-4" />
+                <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
               </Button>
+
+              {/* Optional: Show loading overlay while refreshing */}
+              {isRefreshing && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                  <RefreshCw className="h-8 w-8 text-white animate-spin" />
+                </div>
+              )}
             </>
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-muted">
               <div className="text-center space-y-2">
                 <AlertCircle className="h-8 w-8 mx-auto text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">Snapshot unavailable</p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleRefreshSnapshot}
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Retry
-                </Button>
+                <p className="text-xs text-muted-foreground px-4">
+                  {stream.status !== 'running' 
+                    ? 'Stream must be running to capture snapshots'
+                    : 'Failed to load snapshot'}
+                </p>
+                {stream.status === 'running' && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRefreshSnapshot}
+                    disabled={isRefreshing}
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    Retry
+                  </Button>
+                )}
               </div>
             </div>
           )}
