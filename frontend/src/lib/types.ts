@@ -13,9 +13,7 @@ export interface StreamResponse {
   id: string;
   name: string;
   rtsp_url: string;
-  hw_accel_enabled: boolean;
   ffmpeg_params: string[];
-  auto_start: boolean;  // NEW: Auto-start on creation/reboot
   created_at: string;
   order: number;
   status: 'Active' | 'Inactive' | 'running' | 'stopped' | 'error' | 'starting' | 'disconnected';
@@ -27,7 +25,6 @@ export interface StreamResponse {
 export interface NewStreamRequest {
   name: string;
   rtsp_url: string;
-  hw_accel_enabled?: boolean;
   ffmpeg_params?: string[];
   auto_start?: boolean;  // NEW: Auto-start on creation/reboot (default: true)
 }
@@ -39,9 +36,7 @@ export interface NewStreamRequest {
 export interface EditStreamRequest {
   name?: string;
   rtsp_url?: string;
-  hw_accel_enabled?: boolean;
   ffmpeg_params?: string[];
-  auto_start?: boolean;  // NEW: Update auto-start setting
 }
 
 /**
@@ -81,7 +76,6 @@ export interface ApiError {
 export interface StreamFormData {
   name: string;
   rtsp_url: string;
-  auto_start: boolean;  // NEW: Auto-start toggle in form
 }
 
 /**
@@ -106,4 +100,15 @@ export interface LoadingState {
 export interface StreamsState extends LoadingState {
   streams: StreamResponse[];
   lastUpdated: number | null;
+}
+
+/**
+ * FFmpeg defaults response from API
+ */
+export interface FfmpegDefaultsResponse {
+  gpu_backend: string;
+  base_params: string[];
+  gpu_params: string[];
+  combined_params: string;
+  combined_params_array: string[];
 }

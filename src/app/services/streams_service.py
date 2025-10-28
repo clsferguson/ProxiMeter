@@ -32,6 +32,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Final
 
+from ..config.ffmpeg_defaults import get_default_ffmpeg_params
 from ..config_io import load_streams, save_streams, get_gpu_backend
 from ..models.stream import Stream
 from ..utils.validation import validate_rtsp_url as validate_rtsp_url_format
@@ -191,9 +192,7 @@ class StreamsService:
             id=str(uuid.uuid4()),
             name=name,
             rtsp_url=rtsp_url,
-            hw_accel_enabled=hw_accel_enabled,
             ffmpeg_params=ffmpeg_params,
-            auto_start=auto_start,
             created_at=datetime.now(timezone.utc).isoformat(),
             order=len(streams),
             status="stopped"
@@ -205,13 +204,12 @@ class StreamsService:
         config["streams"] = streams
         save_streams(config)
         
-        logger.info(f"Created stream: {name} ({stream.id}, auto_start={auto_start})")
-        
-        # Auto-start if enabled
-        if auto_start:
-            logger.info(f"Auto-starting: {stream.id}")
-            asyncio.create_task(self.start_stream(stream.id, stream_dict))
-        
+        logger.info(f"Created stream: {name} ({stream.id})")
+
+        # Always start stream (person detection requires it)
+        logger.info(f"Starting stream: {stream.id}")
+        asyncio.create_task(self.start_stream(stream.id, stream_dict))
+
         return stream_dict
     
     # ========================================================================
@@ -258,12 +256,6 @@ class StreamsService:
             stream["rtsp_url"] = rtsp_url
             url_changed = True
         
-        # Update HW accel
-        if hw_accel_enabled is not None:
-            if hw_accel_enabled and self.gpu_backend == "none":
-                raise RuntimeError("GPU acceleration unavailable")
-            stream["hw_accel_enabled"] = hw_accel_enabled
-        
         # Update FFmpeg params (apply defaults if cleared)
         if ffmpeg_params is not None:
             if not ffmpeg_params:
@@ -273,11 +265,7 @@ class StreamsService:
             else:
                 stream["ffmpeg_params"] = ffmpeg_params
                 logger.debug(f"Applied custom params: {stream_id}")
-        
-        # Update auto-start
-        if auto_start is not None:
-            stream["auto_start"] = auto_start
-        
+
         # Re-probe if URL changed
         if url_changed:
             logger.debug(f"Re-probing: {stream_id}")
@@ -379,29 +367,30 @@ class StreamsService:
     # Auto-Start Support
     # ========================================================================
     
-    async def auto_start_configured_streams(self) -> None:
-        """Auto-start all streams with auto_start=True.
+    async def start_all_streams(self) -> None:
+        """Start all configured streams on application startup.
         
-        Called on application startup to resume streams.
+        Person detection requires streams to be running, so all streams
+        are automatically started when the application boots.
         """
         try:
             streams = await self.list_streams()
-            auto_start_streams = [s for s in streams if s.get("auto_start", False)]
             
-            if not auto_start_streams:
-                logger.info("No streams configured for auto-start")
+            if not streams:
+                logger.info("No streams configured")
                 return
             
-            logger.info(f"Auto-starting {len(auto_start_streams)} stream(s)")
+            logger.info(f"Starting {len(streams)} configured stream(s)")
             
-            for stream in auto_start_streams:
+            for stream in streams:
                 stream_id = stream["id"]
                 stream_name = stream.get("name", "Unknown")
-                logger.debug(f"Queuing auto-start: {stream_name} ({stream_id})")
+                logger.debug(f"Queuing stream start: {stream_name} ({stream_id})")
                 asyncio.create_task(self.start_stream(stream_id, stream))
                 
         except Exception as e:
-            logger.error(f"Auto-start failed: {e}", exc_info=True)
+            logger.error(f"Stream startup failed: {e}", exc_info=True)
+
 
     # ========================================================================
     # FFmpeg Process Control
@@ -434,7 +423,6 @@ class StreamsService:
             # Get params
             url = stream["rtsp_url"]
             params = stream.get("ffmpeg_params", [])
-            hw_accel = stream.get("hw_accel_enabled", False)
             
             # Validate
             if not validate_rtsp_url(url, params, self.gpu_backend):
@@ -444,11 +432,11 @@ class StreamsService:
             cmd = build_ffmpeg_command(
                 rtsp_url=url,
                 ffmpeg_params=params,
-                gpu_backend=self.gpu_backend if hw_accel else None
+                gpu_backend=self.gpu_backend
             )
             
             logger.info(f"Starting FFmpeg: {stream_id} ({mask_rtsp_credentials(url)})")
-            logger.debug(f"GPU={self.gpu_backend}, HW_accel={hw_accel}, PID will be assigned")
+            logger.debug(f"GPU={self.gpu_backend}, PID will be assigned")
             
             # Pre-register (prevents race condition in get_frame)
             self.active_processes[stream_id] = {
@@ -669,48 +657,17 @@ class StreamsService:
             if normalize_stream_name(stream.get("name", "")) == normalized_name:
                 raise ValueError(f"Stream name '{name}' already exists")
     
-    def _get_default_ffmpeg_params(self, hw_accel_enabled: bool) -> list[str]:
+    def _get_default_ffmpeg_params(self, hw_accel_enabled: bool = True) -> list[str]:
         """Get default FFmpeg parameters for GPU backend.
         
         Args:
-            hw_accel_enabled: Include GPU acceleration flags
+            hw_accel_enabled: Always True (kept for compatibility)
             
         Returns:
-            List of FFmpeg parameter strings
+            List of FFmpeg parameter strings with GPU acceleration
         """
-        # Base params (always applied)
-        params = [
-            '-hide_banner',
-            '-loglevel', 'warning',
-            '-threads', '2',
-            '-rtsp_transport', 'tcp',
-            '-rtsp_flags', 'prefer_tcp',
-            '-max_delay', '500000',
-            '-analyzeduration', '1000000',
-            '-probesize', '1000000',
-            '-fflags', 'nobuffer',
-            '-flags', 'low_delay',
-        ]
-        
-        # Add GPU params if enabled
-        if hw_accel_enabled and self.gpu_backend != "none":
-            if self.gpu_backend == "nvidia":
-                params.extend([
-                    '-hwaccel', 'cuda',
-                    '-hwaccel_output_format', 'cuda',
-                ])
-            elif self.gpu_backend == "amd":
-                params.extend([
-                    '-hwaccel', 'vaapi',
-                    '-hwaccel_device', '/dev/dri/renderD128',
-                ])
-            elif self.gpu_backend == "intel":
-                params.extend([
-                    '-hwaccel', 'qsv',
-                    '-hwaccel_device', '/dev/dri/renderD128',
-                ])
-        
-        return params
+        # Use centralized config module
+        return get_default_ffmpeg_params(self.gpu_backend)
     
     async def _monitor_ffmpeg_stderr(
         self,

@@ -4,13 +4,12 @@
  * Constitution-compliant stream configuration form with GPU-aware defaults.
  * 
  * Constitution Compliance:
- * - Principle II: 5fps hardcoded, auto-start always enabled
- * - Principle III: GPU backend detection and hardware acceleration
+ * - Principle II: 5fps hardcoded, streams always auto-start
+ * - Principle III: GPU backend detection and hardware acceleration (always enabled)
  * 
  * Features:
- * - GPU-aware FFmpeg parameter defaults
+ * - GPU-aware FFmpeg parameter defaults from backend API (single source of truth)
  * - Client-side validation using react-hook-form + zod
- * - Centralized FFmpeg defaults (not hardcoded in component)
  * - Real-time error display
  * - Accessible form with proper ARIA labels
  * 
@@ -26,7 +25,6 @@ import * as z from 'zod'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Switch } from '@/components/ui/switch'
 import {
   Form,
   FormControl,
@@ -39,74 +37,9 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertCircle, Loader2 } from 'lucide-react'
-import { getGpuBackend } from '@/hooks/useApi'
+import { getGpuBackend, getFfmpegDefaults } from '@/hooks/useApi'
 
 import type { StreamResponse } from '@/lib/types'
-
-// ============================================================================
-// FFmpeg Default Parameters by GPU Backend
-// ============================================================================
-
-/**
- * Base FFmpeg parameters used for all streams regardless of GPU backend.
- * These control basic stream behavior, logging, and reliability.
- * 
- * Constitution Principle II: FFmpeg handles all RTSP processing.
- */
-const BASE_FFMPEG_PARAMS = [
-  '-hide_banner',           // Suppress FFmpeg banner output in logs
-  '-loglevel', 'warning',   // Only show warnings and errors (reduces log noise)
-  '-threads', '2',          // Limit CPU threads to 2 (efficiency for GPU-accelerated workload)
-  '-rtsp_transport', 'tcp', // Use TCP instead of UDP for reliability
-  '-timeout', '10000000',   // 10 second timeout for network operations (10M microseconds)
-] as const
-
-/**
- * GPU-specific hardware acceleration parameters.
- * Applied based on detected GPU backend from entrypoint.sh via GPU_BACKEND_DETECTED env var.
- * 
- * Constitution Principle III: GPU backend contract enforcement.
- * 
- * NVIDIA: Uses CUDA with NVDEC hardware decoder
- * AMD: Uses VAAPI (Video Acceleration API)
- * Intel: Uses Quick Sync Video (QSV)
- */
-const GPU_FFMPEG_PARAMS = {
-  nvidia: [
-    '-hwaccel', 'cuda',                    // Enable NVIDIA CUDA acceleration
-    '-hwaccel_output_format', 'cuda',      // Keep decoded frames in GPU memory
-    '-c:v', 'h264_cuvid',                  // Use CUDA video decoder (NVDEC)
-  ],
-  amd: [
-    '-hwaccel', 'vaapi',                   // Enable AMD VAAPI acceleration
-    '-hwaccel_device', '/dev/dri/renderD128', // AMD GPU device path
-    '-c:v', 'h264',                        // Standard H.264 decoder with VAAPI
-  ],
-  intel: [
-    '-hwaccel', 'qsv',                     // Enable Intel Quick Sync Video
-    '-hwaccel_device', '/dev/dri/renderD128', // Intel GPU device path
-    '-c:v', 'h264_qsv',                    // Intel QSV H.264 decoder
-  ],
-  none: [] as string[],                    // No hardware acceleration (CPU only - not recommended)
-} as const
-
-/**
- * Builds complete FFmpeg parameter string based on detected GPU backend.
- * 
- * This is the single source of truth for default FFmpeg parameters.
- * Parameters are concatenated and used as placeholder in the form.
- * 
- * @param gpuBackend - Detected GPU backend (nvidia, amd, intel, none)
- * @returns Space-separated FFmpeg parameter string
- * 
- * @example
- * buildDefaultFFmpegParams('nvidia')
- * // Returns: "-hide_banner -loglevel warning ... -hwaccel cuda -hwaccel_output_format cuda -c:v h264_cuvid"
- */
-function buildDefaultFFmpegParams(gpuBackend: string): string {
-  const gpuParams = GPU_FFMPEG_PARAMS[gpuBackend as keyof typeof GPU_FFMPEG_PARAMS] || []
-  return [...BASE_FFMPEG_PARAMS, ...gpuParams].join(' ')
-}
 
 // ============================================================================
 // Validation Schema
@@ -118,10 +51,9 @@ function buildDefaultFFmpegParams(gpuBackend: string): string {
  * Constitution-compliant validation:
  * - Name: 1-50 characters
  * - RTSP URL: Must start with rtsp:// or rtsps://
- * - Hardware acceleration: Boolean (default true)
  * - FFmpeg params: Optional string (defaults applied on backend if empty)
  * 
- * Note: auto_start and target_fps are hardcoded on backend per constitution.
+ * Note: Hardware acceleration and auto_start are hardcoded on backend per constitution.
  */
 const streamFormSchema = z.object({
   name: z
@@ -136,8 +68,6 @@ const streamFormSchema = z.object({
       /^rtsps?:\/\/.+/i,
       'Must be a valid RTSP URL (rtsp:// or rtsps://)'
     ),
-  
-  hw_accel_enabled: z.boolean(),
   
   ffmpeg_params: z.string().optional(),
 })
@@ -178,7 +108,7 @@ interface StreamFormProps {
 /**
  * StreamForm Component
  * 
- * Auto-start is always true per constitution (continuous monitoring).
+ * Hardware acceleration and auto-start are always enabled per constitution.
  * Target FPS is hardcoded to 5fps on backend per Principle II.
  */
 export function StreamForm({
@@ -198,6 +128,7 @@ export function StreamForm({
   const [submitError, setSubmitError] = useState<string | null>(error)
   const [gpuBackend, setGpuBackend] = useState<string>('none')
   const [isLoadingGpu, setIsLoadingGpu] = useState(true)
+  const [ffmpegDefaults, setFfmpegDefaults] = useState<string>('')
   
   // ========================================================================
   // Form Initialization
@@ -208,46 +139,57 @@ export function StreamForm({
     defaultValues: {
       name: initialValues?.name ?? '',
       rtsp_url: initialValues?.rtsp_url ?? '',
-      hw_accel_enabled: initialValues?.hw_accel_enabled ?? true,
       ffmpeg_params: initialValues?.ffmpeg_params?.join(' ') ?? '',
     },
     mode: 'onBlur', // Validate on blur for better UX
   })
   
   // ========================================================================
-  // GPU Backend Detection
+  // GPU Backend & FFmpeg Defaults Detection
   // ========================================================================
   
   /**
-   * Fetch GPU backend on mount to determine default FFmpeg parameters.
+   * Fetch GPU backend and FFmpeg defaults on mount.
    * 
-   * Calls /api/streams/gpu-backend which returns GPU_BACKEND_DETECTED
-   * env var set by entrypoint.sh during container startup.
+   * Calls:
+   * - /api/streams/gpu-backend: Returns GPU_BACKEND_DETECTED env var
+   * - /api/streams/ffmpeg-defaults: Returns default FFmpeg parameters
+   * 
+   * This establishes the single source of truth from backend config.
    * 
    * Constitution Principle III: Explicit GPU backend contract.
    */
   useEffect(() => {
     let mounted = true
     
-    const fetchGpuBackend = async () => {
+    const fetchGpuAndDefaults = async () => {
       try {
-        const data = await getGpuBackend()
+        // Fetch GPU backend
+        const gpuData = await getGpuBackend()
         
         if (!mounted) return
         
-        setGpuBackend(data.gpu_backend || 'none')
+        setGpuBackend(gpuData.gpu_backend || 'none')
+        
+        // Fetch FFmpeg defaults (single source of truth)
+        const defaultsData = await getFfmpegDefaults()
+        if (mounted) {
+          setFfmpegDefaults(defaultsData.combined_params)
+        }
         
         // Log GPU status for debugging
-        if (data.gpu_backend === 'none') {
+        if (gpuData.gpu_backend === 'none') {
           console.warn('No GPU detected - hardware acceleration unavailable')
         } else {
-          console.info(`GPU backend detected: ${data.gpu_backend}`)
+          console.info(`GPU backend detected: ${gpuData.gpu_backend}`)
+          console.info(`FFmpeg defaults: ${defaultsData.combined_params}`)
         }
         
       } catch (err) {
-        console.error('Failed to fetch GPU backend:', err)
+        console.error('Failed to fetch GPU backend or FFmpeg defaults:', err)
         if (mounted) {
           setGpuBackend('none')
+          setFfmpegDefaults('')
         }
       } finally {
         if (mounted) {
@@ -256,7 +198,7 @@ export function StreamForm({
       }
     }
     
-    fetchGpuBackend()
+    fetchGpuAndDefaults()
     
     return () => {
       mounted = false
@@ -309,10 +251,10 @@ export function StreamForm({
   // Computed Values
   // ========================================================================
   
-  // Generate placeholder text based on detected GPU backend
+  // Generate placeholder text from backend FFmpeg defaults
   const ffmpegPlaceholder = isLoadingGpu 
     ? 'Loading GPU backend...'
-    : buildDefaultFFmpegParams(gpuBackend)
+    : ffmpegDefaults || 'No defaults available'
   
   // ========================================================================
   // Render
@@ -325,7 +267,7 @@ export function StreamForm({
         <CardDescription>
           {isEdit
             ? 'Update stream configuration (will require manual restart if FFmpeg params changed)'
-            : 'Configure a new RTSP stream (5fps, full resolution, auto-start enabled)'}
+            : 'Configure a new RTSP stream (5fps, full resolution, GPU-accelerated, auto-starts)'}
         </CardDescription>
       </CardHeader>
       
@@ -390,34 +332,9 @@ export function StreamForm({
                     />
                   </FormControl>
                   <FormDescription>
-                    Complete RTSP URL including credentials. Stream processes at 5fps automatically.
+                    Complete RTSP URL including credentials. Must start with rtsp:// or rtsps://
                   </FormDescription>
                   <FormMessage />
-                </FormItem>
-              )}
-            />
-            
-            {/* Hardware Acceleration Switch */}
-            <FormField
-              control={form.control}
-              name="hw_accel_enabled"
-              render={({ field }) => (
-                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                  <div className="space-y-0.5">
-                    <FormLabel className="text-base">
-                      Hardware Acceleration
-                    </FormLabel>
-                    <FormDescription>
-                      Use GPU for stream decoding ({gpuBackend !== 'none' ? `${gpuBackend} detected` : 'no GPU detected'})
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                      disabled={isLoading || gpuBackend === 'none'}
-                    />
-                  </FormControl>
                 </FormItem>
               )}
             />
@@ -440,12 +357,22 @@ export function StreamForm({
                   </FormControl>
                   <FormDescription>
                     Space-separated FFmpeg flags. Leave empty to use GPU backend defaults shown above.
+                    Custom parameters completely replace defaults (not merged).
                     {isEdit && ' Note: Changing params requires stopping and restarting the stream.'}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
+            
+            {/* Info about hardcoded settings */}
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                <strong>Note:</strong> All streams use GPU acceleration ({gpuBackend !== 'none' ? gpuBackend : 'unavailable'}), 
+                run at 5 FPS, and start automatically. These settings cannot be changed.
+              </AlertDescription>
+            </Alert>
             
             {/* Form Actions */}
             <div className="flex gap-3 pt-4">

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -68,19 +68,9 @@ class Stream(BaseModel):
         examples=["rtsp://admin:pass@192.168.1.100:554/stream"]
     )
     
-    hw_accel_enabled: bool = Field(
-        default=True,
-        description="Enable GPU hardware acceleration"
-    )
-    
     ffmpeg_params: list[str] = Field(
         default_factory=list,
         description="Custom FFmpeg parameters (empty uses defaults)"
-    )
-    
-    auto_start: bool = Field(
-        default=True,
-        description="Auto-start stream on creation or app restart"
     )
     
     created_at: str = Field(
@@ -129,19 +119,9 @@ class NewStream(BaseModel):
         examples=["rtsp://admin:pass@192.168.1.100:554/stream"]
     )
     
-    hw_accel_enabled: bool = Field(
-        default=True,
-        description="Enable GPU hardware acceleration"
-    )
-    
     ffmpeg_params: list[str] = Field(
         default_factory=list,
         description="Custom FFmpeg parameters (empty uses defaults)"
-    )
-    
-    auto_start: bool = Field(
-        default=True,
-        description="Auto-start stream on creation or app restart"
     )
     
     @model_validator(mode="after")
@@ -179,19 +159,9 @@ class EditStream(BaseModel):
         description="Processing status"
     )
     
-    hw_accel_enabled: bool | None = Field(
-        default=None,
-        description="Enable GPU hardware acceleration"
-    )
-    
     ffmpeg_params: list[str] | None = Field(
         default=None,
         description="Custom FFmpeg parameters"
-    )
-    
-    auto_start: bool | None = Field(
-        default=None,
-        description="Auto-start setting"
     )
     
     @model_validator(mode="after")

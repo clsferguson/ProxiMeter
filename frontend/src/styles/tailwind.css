@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@theme {
+:root {
   /* Base colors - matching legacy styles.css */
   --color-background: #0b0b10;
   --color-foreground: #e5e7eb;

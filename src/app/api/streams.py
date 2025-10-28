@@ -34,9 +34,14 @@ from fastapi.responses import StreamingResponse, Response
 
 from ..models.stream import NewStream, EditStream, ReorderRequest
 from ..services.streams_service import StreamsService
-from ..utils.rtsp import validate_rtsp_url, build_ffmpeg_command
+from ..utils.rtsp import validate_rtsp_url
 from ..utils.strings import mask_rtsp_credentials
 from ..config_io import get_gpu_backend
+from ..config.ffmpeg_defaults import (
+    BASE_FFMPEG_PARAMS,
+    GPU_FFMPEG_PARAMS,
+    get_default_ffmpeg_params_string
+)
 from ..services.container import get_streams_service
 
 logger = logging.getLogger(__name__)
@@ -71,8 +76,7 @@ _start_lock = asyncio.Lock()
 
 async def validate_stream_config(
     rtsp_url: str,
-    ffmpeg_params: list[str] | None,
-    hw_accel_enabled: bool
+    ffmpeg_params: list[str] | None
 ) -> None:
     """Validate stream configuration before creation/update.
     
@@ -85,7 +89,7 @@ async def validate_stream_config(
         ValueError: Invalid configuration
         RuntimeError: GPU not available
     """
-    logger.debug(f"Validating config: rtsp={mask_rtsp_credentials(rtsp_url)}, hw_accel={hw_accel_enabled}")
+    logger.debug(f"Validating config: rtsp={mask_rtsp_credentials(rtsp_url)}")
     
     gpu_backend = get_gpu_backend()
     params = ffmpeg_params or []
@@ -102,17 +106,7 @@ async def validate_stream_config(
         logger.error(f"RTSP validation failed: {mask_rtsp_credentials(rtsp_url)}")
         raise ValueError("Invalid RTSP URL or FFmpeg parameters")
     
-    # Verify FFmpeg command can be built
-    try:
-        cmd = build_ffmpeg_command(
-            rtsp_url=rtsp_url,
-            ffmpeg_params=params,
-            gpu_backend=gpu_backend
-        )
-        logger.debug(f"FFmpeg command validated: {len(cmd)} args")
-    except Exception as e:
-        logger.error(f"FFmpeg command build failed: {e}")
-        raise
+    logger.debug(f"Config validated: RTSP format OK, {len(params)} custom params")
 
 
 def mask_stream_response(stream: dict) -> dict:
@@ -169,6 +163,24 @@ async def reorder_streams(
             detail="Failed to reorder streams"
         )
 
+@router.get("/ffmpeg-defaults")
+async def get_ffmpeg_defaults() -> dict:
+    """Get default FFmpeg parameters for detected GPU backend.
+    
+    Returns default parameters that will be used if user doesn't specify custom ones.
+    This is the single source of truth for FFmpeg configuration.
+    """
+    backend = get_gpu_backend()
+    
+    logger.debug(f"FFmpeg defaults query: GPU={backend}")
+    
+    return {
+        "gpu_backend": backend,
+        "base_params": list(BASE_FFMPEG_PARAMS),
+        "gpu_params": GPU_FFMPEG_PARAMS.get(backend, []),
+        "combined_params": get_default_ffmpeg_params_string(backend),
+        "combined_params_array": get_default_ffmpeg_params_string(backend).split(),
+    }
 
 # ============================================================================
 # CRUD Endpoints
@@ -205,15 +217,12 @@ async def create_stream(
         await validate_stream_config(
             rtsp_url=new_stream.rtsp_url,
             ffmpeg_params=new_stream.ffmpeg_params,
-            hw_accel_enabled=new_stream.hw_accel_enabled
         )
         
         stream = await service.create_stream(
             name=new_stream.name,
             rtsp_url=new_stream.rtsp_url,
-            hw_accel_enabled=new_stream.hw_accel_enabled,
-            ffmpeg_params=new_stream.ffmpeg_params,
-            auto_start=new_stream.auto_start
+            ffmpeg_params=new_stream.ffmpeg_params
         )
         
         logger.info(f"Stream created: {stream['name']} ({stream['id']})")
@@ -286,12 +295,6 @@ async def update_stream(
                 if set(current.get("ffmpeg_params", [])) != set(edit_stream.ffmpeg_params):
                     needs_restart = True
                     logger.info(f"FFmpeg params changed for {stream_id}, restart required")
-            
-            # HW accel changed
-            if edit_stream.hw_accel_enabled is not None:
-                if edit_stream.hw_accel_enabled != current.get("hw_accel_enabled"):
-                    needs_restart = True
-                    logger.info(f"HW accel changed for {stream_id}, restart required")
         
         # Stop if restart needed
         if needs_restart:
@@ -302,12 +305,7 @@ async def update_stream(
         if edit_stream.rtsp_url is not None or edit_stream.ffmpeg_params is not None:
             url = edit_stream.rtsp_url or current["rtsp_url"]
             params = edit_stream.ffmpeg_params or current.get("ffmpeg_params", [])
-            hw_accel = (
-                edit_stream.hw_accel_enabled 
-                if edit_stream.hw_accel_enabled is not None 
-                else current.get("hw_accel_enabled", False)
-            )
-            await validate_stream_config(url, params, hw_accel)
+            await validate_stream_config(url, params)
         
         # Update
         updated = await service.update_stream(
@@ -315,9 +313,7 @@ async def update_stream(
             name=edit_stream.name,
             rtsp_url=edit_stream.rtsp_url,
             status=edit_stream.status,
-            hw_accel_enabled=edit_stream.hw_accel_enabled,
-            ffmpeg_params=edit_stream.ffmpeg_params,
-            auto_start=edit_stream.auto_start
+            ffmpeg_params=edit_stream.ffmpeg_params
         )
         
         if not updated:

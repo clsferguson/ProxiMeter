@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info(f"GPU backend: {gpu_backend}")
         
         # Auto-start streams
-        await container.streams_service.auto_start_configured_streams()
+        await container.streams_service.start_all_streams()
         
     except Exception as e:
         logger.error(f"Startup error: {e}", exc_info=True)

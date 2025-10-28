@@ -184,14 +184,6 @@ export default function PlayStream() {
                     </Badge>
                   </dd>
                 </div>
-                <div className="flex justify-between items-center">
-                  <dt className="text-muted-foreground">GPU Acceleration</dt>
-                  <dd className="font-medium">{stream.hw_accel_enabled ? 'Enabled' : 'Disabled'}</dd>
-                </div>
-                <div className="flex justify-between items-center">
-                  <dt className="text-muted-foreground">Auto Start</dt>
-                  <dd className="font-medium">{stream.auto_start ? 'Enabled' : 'Disabled'}</dd>
-                </div>
               </dl>
             </CardContent>
           </Card>

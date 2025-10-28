@@ -32,7 +32,6 @@ import type { StreamResponse } from '@/lib/types'
 interface StreamFormData {
   name: string
   rtsp_url: string
-  hw_accel_enabled: boolean
   ffmpeg_params: string | string[]
 }
 
@@ -70,7 +69,6 @@ export default function EditStream() {
       const submitData = {
         name: data.name,
         rtsp_url: data.rtsp_url,
-        hw_accel_enabled: data.hw_accel_enabled,
         ffmpeg_params: typeof data.ffmpeg_params === 'string' 
           ? data.ffmpeg_params.split(' ').filter(Boolean) 
           : data.ffmpeg_params

@@ -1,19 +1,23 @@
 /**
  * StreamCard Component - Manual Refresh Only
  * 
+ * Displays stream information with snapshot preview and FFmpeg parameters.
  * NO automatic snapshot fetching. User must click refresh button.
+ * 
+ * Shows FFmpeg params from stream config or backend defaults (single source of truth).
  */
 
 import { Link } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Edit2, Play, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw, Camera } from 'lucide-react'
+import { Edit2, Play, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw, Camera, Code2 } from 'lucide-react'
 import type { StreamResponse } from '@/lib/types'
 import { truncateText, maskRtspUrl } from '@/lib/utils'
 import { API_BASE_URL } from '@/lib/constants'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { ReactElement } from 'react'
+import { getFfmpegDefaults } from '@/hooks/useApi'
 
 interface StreamCardProps {
   stream: StreamResponse
@@ -49,12 +53,22 @@ function getStatusBadge(status: string): ReactElement {
   )
 }
 
-export default function StreamCard({ stream, onDelete }: StreamCardProps) {
+function StreamCard({ stream, onDelete }: StreamCardProps) {
+  
+  // ========================================================================
+  // State Management
+  // ========================================================================
   
   const [snapshotKey, setSnapshotKey] = useState(0)
   const [imageError, setImageError] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [ffmpegDefaults, setFfmpegDefaults] = useState<string | null>(null)
+  const [showFullParams, setShowFullParams] = useState(false)
 
+  // ========================================================================
+  // Computed Values
+  // ========================================================================
+  
   const truncatedName = truncateText(stream.name, 40)
   const maskedUrl = maskRtspUrl(stream.rtsp_url)
   const displayUrl = maskedUrl.length > 20 ? '...' + maskedUrl.slice(-20) : maskedUrl
@@ -68,6 +82,49 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
     ? `${API_BASE_URL}/streams/${stream.id}/snapshot?t=${snapshotKey}`
     : null
 
+  // Determine which FFmpeg params to display
+  const ffmpegParamsToDisplay = stream.ffmpeg_params.length > 0 
+    ? stream.ffmpeg_params.join(' ')
+    : (ffmpegDefaults || 'Loading defaults...')
+  
+  const isUsingDefaults = stream.ffmpeg_params.length === 0
+
+  // ========================================================================
+  // Effects
+  // ========================================================================
+  
+  /**
+   * Fetch FFmpeg defaults from backend on mount.
+   * This establishes the single source of truth for default parameters.
+   */
+  useEffect(() => {
+    let mounted = true
+    
+    const fetchDefaults = async () => {
+      try {
+        const data = await getFfmpegDefaults()
+        if (mounted) {
+          setFfmpegDefaults(data.combined_params)
+        }
+      } catch (err) {
+        console.error('Failed to fetch FFmpeg defaults:', err)
+        if (mounted) {
+          setFfmpegDefaults('Error loading defaults')
+        }
+      }
+    }
+    
+    fetchDefaults()
+    
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  // ========================================================================
+  // Event Handlers
+  // ========================================================================
+  
   const handleDelete = () => {
     if (onDelete) {
       onDelete(stream.id)
@@ -93,6 +150,14 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
     setIsRefreshing(false)
   }
 
+  const toggleShowFullParams = () => {
+    setShowFullParams(prev => !prev)
+  }
+
+  // ========================================================================
+  // Render
+  // ========================================================================
+  
   return (
     <Card className="flex flex-col h-full hover:shadow-lg transition-all duration-200">
       
@@ -114,6 +179,7 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
 
       <CardContent className="flex-1 space-y-4 pb-4">
         
+        {/* Stream Info */}
         <div className="space-y-2 text-sm">
           <div className="flex justify-between items-center">
             <span className="text-muted-foreground">Status:</span>
@@ -122,6 +188,40 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
           <div className="flex justify-between items-center">
             <span className="text-muted-foreground">Created:</span>
             <span className="font-medium text-xs">{createdDate}</span>
+          </div>
+          
+          {/* FFmpeg Parameters Display */}
+          <div className="flex flex-col gap-1 pt-1">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1">
+                <Code2 className="h-3 w-3 text-muted-foreground" />
+                <span className="text-muted-foreground text-xs">FFmpeg Params:</span>
+              </div>
+              {isUsingDefaults && (
+                <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                  defaults
+                </Badge>
+              )}
+            </div>
+            <div className="relative">
+              <code 
+                className={`block text-[10px] font-mono bg-muted px-2 py-1.5 rounded break-all leading-relaxed ${
+                  !showFullParams && ffmpegParamsToDisplay.length > 60 ? 'line-clamp-2' : ''
+                }`}
+              >
+                {ffmpegParamsToDisplay}
+              </code>
+              {ffmpegParamsToDisplay.length > 60 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 text-[10px] px-1 py-0 mt-1"
+                  onClick={toggleShowFullParams}
+                >
+                  {showFullParams ? 'Show less' : 'Show more'}
+                </Button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -192,6 +292,7 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
           )}
         </div>
 
+        {/* Action Buttons */}
         <div className="flex flex-col gap-2 pt-2">
           <div className="flex gap-2">
             <Link to={`/play/${stream.id}`} className="flex-1">
@@ -221,3 +322,5 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
     </Card>
   )
 }
+
+export default StreamCard
