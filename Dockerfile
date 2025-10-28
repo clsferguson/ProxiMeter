@@ -22,8 +22,9 @@ RUN npm run build
 # ============================================================================
 FROM python:3.12-slim-trixie AS python-base
 
-# Python environment
-ENV PYTHONDONTWRITEBYTECODE=1 \
+# environment
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     APP_PORT=8000

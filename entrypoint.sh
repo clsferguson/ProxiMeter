@@ -48,18 +48,21 @@ if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
     # Install NVIDIA CUDA libraries for FFmpeg
     echo "   📦 Installing NVIDIA CUDA libraries..."
 
-    install_packages \
-        gnupg2
+    # install_packages \
+    #     gnupg2
 
-    wget -q https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
-    dpkg -i cuda-keyring_1.1-1_all.deb
-    rm cuda-keyring_1.1-1_all.deb
+    # wget -q https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
+    # dpkg -i cuda-keyring_1.1-1_all.deb
+    # rm cuda-keyring_1.1-1_all.deb
 
-    if ! dpkg -l | grep -q libnvcuvid1; then
-        install_packages \
-            libnvcuvid1 \
-            libnvidia-encode1
-        rm -rf /var/lib/apt/lists/*
+    # if ! dpkg -l | grep -q libnvcuvid1; then
+    #     install_packages \
+    #         libnvcuvid1 \
+    #         libnvidia-encode1
+        
+    #     # Clean up
+    #     rm -rf /var/lib/apt/lists/*
+
         echo "   ✅ NVIDIA libraries installed"
     else
         echo "   ✅ NVIDIA libraries already installed"
