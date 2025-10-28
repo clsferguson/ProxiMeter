@@ -37,19 +37,14 @@ export default function Dashboard() {
   const [streamToDelete, setStreamToDelete] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  // ============================================================================
-  // Refetch streams when returning to dashboard (e.g., from PlayStream)
-  // ============================================================================
-  
+  // Refetch on window focus/visibility
   useEffect(() => {
-    // Refetch when component mounts or becomes visible
     const handleVisibilityChange = () => {
       if (!document.hidden) {
         refetch()
       }
     }
 
-    // Refetch when navigating back to dashboard
     const handleFocus = () => {
       refetch()
     }
@@ -109,6 +104,7 @@ export default function Dashboard() {
 
       <div className="space-y-6">
         
+        {/* Initial loading state */}
         {isLoading && streams.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 space-y-4">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -116,6 +112,7 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Error state */}
         {error && streams.length === 0 && (
           <Alert variant="destructive" className="max-w-2xl mx-auto">
             <AlertCircle className="h-4 w-4" />
@@ -133,10 +130,12 @@ export default function Dashboard() {
           </Alert>
         )}
 
+        {/* Empty state */}
         {!isLoading && !error && streams.length === 0 && (
           <EmptyState />
         )}
 
+        {/* Streams grid */}
         {streams.length > 0 && (
           <div className="grid gap-6 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
             {streams.map(stream => (
@@ -148,8 +147,10 @@ export default function Dashboard() {
             ))}
           </div>
         )}
+        
       </div>
 
+      {/* Delete confirmation dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

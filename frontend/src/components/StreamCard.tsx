@@ -63,10 +63,10 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
   useEffect(() => {
     // If stream just became running and we haven't loaded a snapshot yet
     if (stream.status === 'running' && snapshotKey === 0) {
-      // Wait 2 seconds for FFmpeg to start producing frames
+      // Wait 5 seconds for FFmpeg to start producing frames
       const timer = setTimeout(() => {
         setSnapshotKey(1) // Trigger first snapshot load
-      }, 2000)
+      }, 5000) // CHANGED: 2000 → 5000
       
       return () => clearTimeout(timer)
     }
@@ -179,7 +179,8 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
                   // Stream just started, waiting for first frame
                   <>
                     <Camera className="h-8 w-8 mx-auto text-muted-foreground animate-pulse" />
-                    <p className="text-sm text-muted-foreground">Waiting for stream...</p>
+                    <p className="text-sm text-muted-foreground">Starting stream...</p>
+                    <p className="text-xs text-muted-foreground">Please wait ~5 seconds</p>
                   </>
                 ) : stream.status === 'running' && imageError ? (
                   // Stream running but snapshot failed
