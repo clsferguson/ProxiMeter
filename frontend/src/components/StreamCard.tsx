@@ -2,34 +2,24 @@
  * StreamCard Component - Stream Thumbnail Display
  * 
  * Displays a SINGLE STATIC snapshot. No auto-refresh, no overlays.
- * User must manually click refresh button to get a new snapshot.
- * 
- * @module components/StreamCard
+ * Only fetches snapshot when stream is running.
  */
 
 import { Link } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Edit2, Play, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw } from 'lucide-react'
+import { Edit2, Play, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw, Camera } from 'lucide-react'
 import type { StreamResponse } from '@/lib/types'
 import { truncateText, maskRtspUrl } from '@/lib/utils'
 import { API_BASE_URL } from '@/lib/constants'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { ReactElement } from 'react'
-
-// ============================================================================
-// Type Definitions
-// ============================================================================
 
 interface StreamCardProps {
   stream: StreamResponse
   onDelete?: (streamId: string) => void
 }
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
 
 function getStatusBadge(status: string): ReactElement {
   const normalizedStatus = status.toLowerCase()
@@ -60,31 +50,27 @@ function getStatusBadge(status: string): ReactElement {
   )
 }
 
-// ============================================================================
-// Main Component
-// ============================================================================
-
-/**
- * StreamCard Component - Static Snapshot Only
- * 
- * Shows ONE static JPEG snapshot. No auto-refresh timer.
- * User clicks refresh button to manually update.
- */
 export default function StreamCard({ stream, onDelete }: StreamCardProps) {
-  
-  // ============================================================================
-  // State Management
-  // ============================================================================
   
   const [snapshotKey, setSnapshotKey] = useState(0)
   const [imageError, setImageError] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
-  // NO AUTO-REFRESH TIMER - removed useEffect
-
   // ============================================================================
-  // Data Preparation
+  // Auto-fetch snapshot when stream becomes running
   // ============================================================================
+  
+  useEffect(() => {
+    // If stream just became running and we haven't loaded a snapshot yet
+    if (stream.status === 'running' && snapshotKey === 0) {
+      // Wait 2 seconds for FFmpeg to start producing frames
+      const timer = setTimeout(() => {
+        setSnapshotKey(1) // Trigger first snapshot load
+      }, 2000)
+      
+      return () => clearTimeout(timer)
+    }
+  }, [stream.status, snapshotKey])
 
   const truncatedName = truncateText(stream.name, 40)
   const maskedUrl = maskRtspUrl(stream.rtsp_url)
@@ -95,12 +81,10 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
     day: 'numeric'
   })
 
-  // Snapshot URL with cache-busting key
-  const snapshotUrl = `${API_BASE_URL}/streams/${stream.id}/snapshot?t=${snapshotKey}`
-
-  // ============================================================================
-  // Event Handlers
-  // ============================================================================
+  // Only generate snapshot URL if stream is running
+  const snapshotUrl = stream.status === 'running' && snapshotKey > 0
+    ? `${API_BASE_URL}/streams/${stream.id}/snapshot?t=${snapshotKey}`
+    : null
 
   const handleDelete = () => {
     if (onDelete) {
@@ -126,10 +110,6 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
   const handleImageLoad = () => {
     setIsRefreshing(false)
   }
-
-  // ============================================================================
-  // Render
-  // ============================================================================
 
   return (
     <Card className="flex flex-col h-full hover:shadow-lg transition-all duration-200">
@@ -163,9 +143,9 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
           </div>
         </div>
 
-        {/* Static snapshot - NO OVERLAYS */}
+        {/* Snapshot preview */}
         <div className="relative w-full aspect-video bg-black rounded-md overflow-hidden">
-          {!imageError ? (
+          {stream.status === 'running' && snapshotUrl && !imageError ? (
             <>
               <img
                 src={snapshotUrl}
@@ -175,14 +155,12 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
                 onLoad={handleImageLoad}
               />
               
-              {/* NO SCORE OVERLAY - removed */}
-              
               <Button
                 size="sm"
                 variant="ghost"
                 className="absolute bottom-2 right-2 h-8 w-8 p-0 bg-black/50 hover:bg-black/70 text-white"
                 onClick={handleRefreshSnapshot}
-                disabled={isRefreshing || stream.status !== 'running'}
+                disabled={isRefreshing}
                 title="Refresh snapshot"
               >
                 <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -197,18 +175,31 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-muted">
               <div className="text-center space-y-2">
-                <AlertCircle className="h-8 w-8 mx-auto text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">Snapshot unavailable</p>
-                <p className="text-xs text-muted-foreground px-4">
-                  {stream.status !== 'running' 
-                    ? 'Stream must be running'
-                    : 'Failed to load'}
-                </p>
-                {stream.status === 'running' && (
-                  <Button size="sm" variant="outline" onClick={handleRefreshSnapshot} disabled={isRefreshing}>
-                    <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-                    Retry
-                  </Button>
+                {stream.status === 'running' && snapshotKey === 0 ? (
+                  // Stream just started, waiting for first frame
+                  <>
+                    <Camera className="h-8 w-8 mx-auto text-muted-foreground animate-pulse" />
+                    <p className="text-sm text-muted-foreground">Waiting for stream...</p>
+                  </>
+                ) : stream.status === 'running' && imageError ? (
+                  // Stream running but snapshot failed
+                  <>
+                    <AlertCircle className="h-8 w-8 mx-auto text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Failed to load</p>
+                    <Button size="sm" variant="outline" onClick={handleRefreshSnapshot} disabled={isRefreshing}>
+                      <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      Retry
+                    </Button>
+                  </>
+                ) : (
+                  // Stream not running
+                  <>
+                    <Camera className="h-8 w-8 mx-auto text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">No preview available</p>
+                    <p className="text-xs text-muted-foreground px-4">
+                      Stream must be running to capture snapshots
+                    </p>
+                  </>
                 )}
               </div>
             </div>
