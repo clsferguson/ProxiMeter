@@ -37,7 +37,7 @@ from ..config_io import get_gpu_backend
 # This ensures ALL requests use the SAME StreamsService instance with the
 # SAME active_processes dict. Without this, each request creates a new
 # service with an empty dict, causing "Stream not in active_processes" errors.
-from ..main import get_streams_service
+from ..services.container import get_streams_service
 
 logger = logging.getLogger(__name__)
 
