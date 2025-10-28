@@ -22,12 +22,15 @@ RUN npm run build
 # ============================================================================
 FROM python:3.12-slim-trixie AS python-base
 
+# Container build arguments
+ARG DEBIAN_FRONTEND=noninteractive
+
 # environment
-ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONDONTWRITEBYTECODE=1 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    APP_PORT=8000
+    APP_PORT=8000 \
+    NVIDIA_DRIVER_CAPABILITIES="compute,video,utility"
 
 WORKDIR /app
 

@@ -26,47 +26,14 @@ GPU_BACKEND_DETECTED="none"
 
 echo "🔍 Detecting GPU hardware..."
 
-# Function to install packages quietly
-install_packages() {
-    if [ "$DEBUG_MODE" = true ]; then
-        apt-get update && apt-get install -y --no-install-recommends "$@"
-    else
-        apt-get update >/dev/null 2>&1 && apt-get install -y --no-install-recommends "$@" >/dev/null 2>&1
-    fi
-}
-
 # ============================================================================
 # NVIDIA GPU Detection and Setup
 # ============================================================================
-
 if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
     echo "✅ NVIDIA GPU detected"
     GPU_BACKEND_DETECTED="nvidia"
     nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>/dev/null | head -1 | \
         awk -F',' '{printf "   GPU: %s | Driver: %s\n", $1, $2}'
-
-    # Install NVIDIA CUDA libraries for FFmpeg
-    echo "   📦 Installing NVIDIA CUDA libraries..."
-
-    # install_packages \
-    #     gnupg2
-
-    # wget -q https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
-    # dpkg -i cuda-keyring_1.1-1_all.deb
-    # rm cuda-keyring_1.1-1_all.deb
-
-    if ! dpkg -l | grep -q libnvcuvid1; then
-    #     install_packages \
-    #         libnvcuvid1 \
-    #         libnvidia-encode1
-        
-    #     # Clean up
-    #     rm -rf /var/lib/apt/lists/*
-
-        echo "   ✅ NVIDIA libraries installed"
-    else
-        echo "   ✅ NVIDIA libraries already installed"
-    fi
 
     # Verify CUDA library is accessible
     if ldconfig -p | grep -q libnvcuvid.so; then
@@ -85,21 +52,6 @@ elif command -v rocm-smi &> /dev/null && rocm-smi &> /dev/null; then
     echo "✅ AMD GPU detected"
     GPU_BACKEND_DETECTED="amd"
     rocm-smi --showproductname 2>/dev/null | head -1 | sed 's/^/   /' || true
-
-    # Install AMD ROCm libraries for FFmpeg VAAPI
-    echo "   📦 Installing AMD VAAPI libraries..."
-    if ! dpkg -l | grep -q mesa-va-drivers; then
-        install_packages \
-            mesa-va-drivers \
-            vainfo \
-            libva2 \
-            libva-drm2 \
-            libdrm2 \
-            libdrm-amdgpu1
-        echo "   ✅ AMD VAAPI libraries installed"
-    else
-        echo "   ✅ AMD VAAPI libraries already installed"
-    fi
     
     # Verify DRI device exists
     if [ -e /dev/dri/renderD128 ]; then
@@ -117,22 +69,6 @@ elif command -v vainfo &> /dev/null && vainfo 2>/dev/null | grep -q "VAProfile";
     echo "✅ Intel GPU detected"
     GPU_BACKEND_DETECTED="intel"
     vainfo 2>/dev/null | grep "Driver version" | sed 's/^/   /' || true
-
-    # Install Intel QSV libraries for FFmpeg
-    echo "   📦 Installing Intel QSV libraries..."
-    if ! dpkg -l | grep -q intel-media-va-driver; then
-        install_packages \
-            intel-media-va-driver \
-            vainfo \
-            libva2 \
-            libva-drm2 \
-            libmfx1 \
-            libdrm2 \
-            libdrm-intel1
-        echo "   ✅ Intel QSV libraries installed"
-    else
-        echo "   ✅ Intel QSV libraries already installed"
-    fi
     
     # Verify DRI device exists
     if [ -e /dev/dri/renderD128 ]; then
