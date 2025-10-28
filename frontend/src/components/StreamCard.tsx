@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Edit2, Play, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw } from 'lucide-react'
 import type { StreamResponse } from '@/lib/types'
 import { truncateText, maskRtspUrl } from '@/lib/utils'
+import { API_BASE_URL } from '@/lib/constants'
 import { useState, useEffect } from 'react'
 import type { ReactElement } from 'react'
 
@@ -138,8 +139,8 @@ export default function StreamCard({ stream, scores, onDelete }: StreamCardProps
     day: 'numeric'
   })
 
-  // Snapshot URL with cache-busting key
-  const snapshotUrl = `/api/streams/${stream.id}/snapshot?t=${snapshotKey}`
+  // Snapshot URL with cache-busting key - FIXED: Use API_BASE_URL
+  const snapshotUrl = `${API_BASE_URL}/streams/${stream.id}/snapshot?t=${snapshotKey}`
 
   // ============================================================================
   // Event Handlers

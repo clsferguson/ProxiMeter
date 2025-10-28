@@ -499,7 +499,7 @@ class StreamsService:
             logger.debug(f"FFmpeg process started with PID: {process.pid}")
 
             # Wait a moment for process to initialize
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(0.5)
             
             # Check if process died immediately
             if process.returncode is not None:

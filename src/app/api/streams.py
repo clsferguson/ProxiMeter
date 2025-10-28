@@ -597,14 +597,21 @@ async def get_snapshot(
     Raises:
         HTTPException: 404 if not found, 400 if not running, 503 if frame unavailable
     """
+    logger.debug(f"📸 Snapshot request received for stream {stream_id}")
+    
     stream = await service.get_stream(stream_id)
     if not stream:
+        logger.warning(f"❌ Snapshot failed: Stream {stream_id} not found")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Stream not found"
         )
     
+    logger.debug(f"Stream {stream_id} status: {stream['status']}")
+    logger.debug(f"Active processes: {list(service.active_processes.keys())}")
+    
     if stream["status"] != "running":
+        logger.warning(f"❌ Snapshot failed: Stream {stream_id} not running (status: {stream['status']})")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Stream not running. Start stream first."
@@ -616,23 +623,30 @@ async def get_snapshot(
         jpeg_bytes = None
         
         for attempt in range(max_retries):
+            logger.debug(f"Snapshot attempt {attempt + 1}/{max_retries} for stream {stream_id}")
+            
             frame_data = await asyncio.wait_for(
                 service.get_frame(stream_id),
                 timeout=SNAPSHOT_TIMEOUT
             )
             
             if frame_data is None:
+                logger.warning(f"Attempt {attempt + 1}: get_frame returned None")
                 continue
             
             success, frame_bytes = frame_data
             if success and frame_bytes:
                 jpeg_bytes = frame_bytes
+                logger.info(f"✅ Snapshot captured for {stream_id}: {len(jpeg_bytes)} bytes (attempt {attempt + 1})")
                 break
+            else:
+                logger.debug(f"Attempt {attempt + 1}: success={success}, bytes_len={len(frame_bytes) if frame_bytes else 0}")
             
             # Wait a bit before retry
             await asyncio.sleep(0.2)
         
         if not jpeg_bytes:
+            logger.error(f"❌ Snapshot failed for {stream_id}: No frame captured after {max_retries} retries")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Failed to capture frame after retries"
@@ -648,6 +662,7 @@ async def get_snapshot(
         )
         
     except asyncio.TimeoutError:
+        logger.error(f"❌ Snapshot timeout for {stream_id}: Stream may be stalled")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Snapshot timeout - stream may be stalled"
@@ -655,11 +670,12 @@ async def get_snapshot(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error capturing snapshot for {stream_id}: {e}", exc_info=True)
+        logger.error(f"❌ Snapshot error for {stream_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to capture snapshot"
         )
+
 
 
 @router.get("/{stream_id}/scores")
