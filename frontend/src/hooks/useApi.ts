@@ -4,7 +4,6 @@
  */
 
 import { useState, useCallback } from 'react'
-import { API_BASE_URL } from '@/lib/constants'
 import type { FfmpegDefaultsResponse } from '@/lib/types'
 
 interface UseApiState<T> {
@@ -64,7 +63,7 @@ export function useApi<T, Args extends unknown[] = []>(
 }
 
 export async function getGpuBackend(): Promise<{gpu_backend: string}> {
-  const response = await fetch('${API_BASE_URL}/streams/gpu-backend')
+  const response = await fetch('/api/streams/gpu-backend')
   if (!response.ok) throw new Error('Failed to fetch GPU backend')
   return response.json()
 }
@@ -119,7 +118,7 @@ export function useFormSubmit<T, Args extends unknown[] = []>(
  * Get FFmpeg default parameters for detected GPU backend
  */
 export async function getFfmpegDefaults(): Promise<FfmpegDefaultsResponse> {
-  const response = await fetch(`${API_BASE_URL}/streams/ffmpeg-defaults`);
+  const response = await fetch(`/api/streams/ffmpeg-defaults`);
   if (!response.ok) {
     throw new Error('Failed to fetch FFmpeg defaults');
   }

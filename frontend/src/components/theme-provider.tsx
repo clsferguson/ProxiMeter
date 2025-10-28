@@ -72,7 +72,7 @@ export function ThemeProvider({
       return () => media.removeEventListener('change', applySystemTheme)
     }
 
-    setTimeout(() => setSystemTheme(getSystemTheme()), 0)
+    setSystemTheme(getSystemTheme())
   }, [theme])
 
   useEffect(() => {

@@ -18,12 +18,8 @@ BASE_FFMPEG_PARAMS: Final[list[str]] = [
     '-loglevel', 'warning',
     '-threads', '2',
     '-rtsp_transport', 'tcp',
-    '-rtsp_flags', 'prefer_tcp',
-    '-max_delay', '500000',
-    '-analyzeduration', '1000000',
-    '-probesize', '1000000',
-    '-fflags', 'nobuffer',
-    '-flags', 'low_delay',
+    '-analyzeduration', '2000000',
+    '-probesize', '2000000',
 ]
 """Base FFmpeg parameters applied to all streams regardless of GPU backend."""
 

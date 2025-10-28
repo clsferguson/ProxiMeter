@@ -90,7 +90,7 @@ def build_ffmpeg_command(
     # MJPEG output to stdout
     cmd.extend([
         "-c:v", "mjpeg",
-        "-q:v", "8",  # Quality 8 (high quality, 1-31 scale)
+        "-q:v", "3",  # Quality 3 (high quality, 1-31 scale)
         "-f", "mjpeg",
         "-"  # stdout
     ])
