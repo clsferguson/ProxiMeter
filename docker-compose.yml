@@ -1,8 +1,16 @@
 services:
   proximeter:
+    profiles: ["cpu", "gpu"]
     image: ghcr.io/clsferguson/proximeter:latest
     container_name: ProxiMeter
     restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     gpus: all
     ports:
       - "8000:8000"

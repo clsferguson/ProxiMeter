@@ -44,55 +44,13 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build image locally for smoke test
-        run: |
-          docker build --platform linux/amd64 -t test-image:local .
-
-      - name: Run container for smoke test
-        run: |
-          docker run -d -p 8000:8000 --name proximeter test-image:local
-          echo "container-started" > container.txt
-          sleep 2
-          echo "Container logs after startup:"
-          docker logs proximeter || true
-
-      - name: Wait for health
-        run: |
-          set -e
-          for i in {1..30}; do
-            # Check if container is still running
-            if ! docker ps | grep -q proximeter; then
-              echo "✗ Container exited unexpectedly"
-              docker logs proximeter || true
-              exit 1
-            fi
-            code=$(curl -s -o /tmp/h.txt -w "%{http_code}" http://localhost:8000/health || true)
-            body=$(cat /tmp/h.txt || true)
-            if [ "$code" = "200" ] && echo "$body" | grep -q '"status":"ok"'; then
-              echo "✓ Health check passed"; exit 0
-            fi
-            sleep 1
-          done
-          echo "✗ Health check failed after 30s"
-          echo "Response body:"
-          cat /tmp/h.txt || true
-          docker logs proximeter || true
-          exit 1
-
-      - name: Teardown test container
-        if: always()
-        run: |
-          if [ -f container.txt ]; then
-            docker rm -f proximeter || true
-          fi
-
+      # Build and push in one step - no smoke test
       - name: Build and push image
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

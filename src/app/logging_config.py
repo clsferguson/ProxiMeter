@@ -1,4 +1,12 @@
-"""JSON logging configuration for the application."""
+"""Structured logging with credential redaction.
+
+Provides clean logs in format: timestamp | logger | level | message
+
+Switch to JSON with: LOG_FORMAT=json
+
+Security:
+    Automatically redacts RTSP credentials from all log messages.
+"""
 from __future__ import annotations
 
 import json
@@ -7,85 +15,226 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Final
 
+# ============================================================================
+# Constants
+# ============================================================================
 
-# Regex pattern to match RTSP URLs with credentials
-RTSP_CREDENTIAL_PATTERN = re.compile(
+RTSP_CREDENTIAL_PATTERN: Final[re.Pattern[str]] = re.compile(
     r'rtsp://([^:]+):([^@]+)@',
     re.IGNORECASE
 )
+"""Matches RTSP URLs with credentials (rtsp://user:pass@host)."""
 
+STANDARD_LOG_ATTRIBUTES: Final[set[str]] = {
+    "name", "msg", "args", "created", "filename", "funcName",
+    "levelname", "levelno", "lineno", "module", "msecs",
+    "message", "pathname", "process", "processName",
+    "relativeCreated", "thread", "threadName", "exc_info",
+    "exc_text", "stack_info", "taskName"
+}
+"""Standard logging attributes to exclude from JSON extra fields."""
+
+# ============================================================================
+# Credential Redaction
+# ============================================================================
 
 def redact_credentials(message: str) -> str:
-    """Redact credentials from RTSP URLs in log messages.
+    """Redact RTSP credentials from log messages.
+    
+    Replaces rtsp://user:pass@host with rtsp://***:***@host
     
     Args:
-        message: Log message that may contain RTSP URLs with credentials
+        message: Log message
         
     Returns:
-        Message with credentials replaced by ***:***
+        Message with credentials masked
     """
     return RTSP_CREDENTIAL_PATTERN.sub(r'rtsp://***:***@', message)
 
 
-class JSONFormatter(logging.Formatter):
-    """Format log records as newline-delimited JSON with credential redaction."""
+# ============================================================================
+# Formatters
+# ============================================================================
 
+class TextFormatter(logging.Formatter):
+    """Clean text formatter with aligned columns.
+    
+    Format: timestamp | logger | level | message
+    
+    Example:
+        2025-10-28 07:32:03.308 | app.main                    | INFO     | Server starting
+        2025-10-28 07:32:04.789 | app.services.streams        | ERROR    | Failed
+    """
+    
+    LOGGER_WIDTH = 40
+    """Logger name column width."""
+    
     def format(self, record: logging.LogRecord) -> str:
-        """Format a log record as a JSON string with credentials redacted."""
-        # Get the formatted message (creates it from msg % args)
-        message = record.getMessage()  # ← Changed this line
-        message = redact_credentials(message)
+        """Format log record as aligned text."""
+        # Redact message
+        message = redact_credentials(record.getMessage())
         
-        log_data: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": message,
-        }
-
+        # Get local timezone timestamp
+        # Uses system local timezone
+        dt = datetime.fromtimestamp(record.created)
+        # Format: YYYY-MM-DD HH:MM:SS.mmm
+        timestamp = dt.strftime('%Y-%m-%d %H:%M:%S.') + f'{int(dt.microsecond / 1000):03d}'
+        
+        # Pad logger name (truncate with ellipsis if too long)
+        logger_name = record.name
+        if len(logger_name) > self.LOGGER_WIDTH:
+            logger_name = "..." + logger_name[-(self.LOGGER_WIDTH-3):]
+        logger_padded = logger_name.ljust(self.LOGGER_WIDTH)
+        
+        # Pad level (8 chars)
+        level_padded = record.levelname.ljust(8)
+        
+        # Build line
+        log_line = f"{timestamp} | {logger_padded} | {level_padded} | {message}"
+        
+        # Add exception if present
         if record.exc_info:
             exception_text = self.formatException(record.exc_info)
-            log_data["exception"] = redact_credentials(exception_text)
+            log_line += f"\n{redact_credentials(exception_text)}"
+        
+        return log_line
 
-        # Add any extra fields from the record's __dict__
+
+class JSONFormatter(logging.Formatter):
+    """JSON formatter for log aggregation systems (ELK, Splunk, CloudWatch).
+    
+    Produces NDJSON (newline-delimited JSON) with:
+    - timestamp: Local timezone in YYYY-MM-DD HH:MM:SS.mmm format
+    - logger: Hierarchical logger name
+    - level: Log level
+    - message: Redacted message
+    - exception: Stack trace if present
+    - extra_*: Additional fields from log record
+    """
+    
+    def format(self, record: logging.LogRecord) -> str:
+        """Format log record as JSON."""
+        message = redact_credentials(record.getMessage())
+        
+        # Get local timezone timestamp
+        dt = datetime.fromtimestamp(record.created)
+        timestamp = dt.strftime('%Y-%m-%d %H:%M:%S.') + f'{int(dt.microsecond / 1000):03d}'
+        
+        # Match text formatter order: timestamp, logger, level, message
+        log_data: dict[str, Any] = {
+            "timestamp": timestamp,
+            "logger": record.name,
+            "level": record.levelname,
+            "message": message,
+        }
+        
+        # Add exception
+        if record.exc_info:
+            log_data["exception"] = redact_credentials(self.formatException(record.exc_info))
+        
+        # Add stack trace
+        if record.stack_info:
+            log_data["stack_info"] = redact_credentials(record.stack_info)
+        
+        # Add extra fields (prefixed to avoid collisions)
         for key, value in record.__dict__.items():
-            if key not in ["name", "msg", "args", "created", "filename", "funcName", 
-                        "levelname", "levelno", "lineno", "module", "msecs", 
-                        "message", "pathname", "process", "processName", 
-                        "relativeCreated", "thread", "threadName", "exc_info", 
-                        "exc_text", "stack_info", "taskName"]:
-                # Redact credentials from string values
+            if key not in STANDARD_LOG_ATTRIBUTES:
                 if isinstance(value, str):
                     value = redact_credentials(value)
-                log_data[key] = value
+                log_data[f"extra_{key}"] = value
+        
+        return json.dumps(log_data, ensure_ascii=False, default=str)
 
-        return json.dumps(log_data, ensure_ascii=False)
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+def get_log_level() -> int:
+    """Get log level from environment.
+    
+    Returns:
+        Logging level constant (e.g., logging.INFO)
+    """
+    level_str = os.getenv("LOG_LEVEL", "INFO").upper()
+    
+    valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    if level_str not in valid_levels:
+        logging.warning(f"Invalid LOG_LEVEL '{level_str}', using INFO")
+        return logging.INFO
+    
+    return getattr(logging, level_str)
+
+
+def get_log_format() -> str:
+    """Get log format from environment.
+    
+    Returns:
+        "text" or "json"
+    """
+    format_str = os.getenv("LOG_FORMAT", "text").lower()
+    
+    if format_str not in {"text", "json"}:
+        logging.warning(f"Invalid LOG_FORMAT '{format_str}', using text")
+        return "text"
+    
+    return format_str
 
 
 def configure_logging() -> None:
-    """Configure JSON logging based on LOG_LEVEL environment variable.
+    """Configure structured logging with credential redaction.
     
-    Default level is INFO. Valid levels: DEBUG, INFO, WARNING, ERROR, CRITICAL.
+    Sets up:
+    - Root logger with text or JSON formatting
+    - Console (stdout) handler
+    - Credential redaction for security
+    - Uvicorn logger integration
+    
+    Environment:
+        LOG_LEVEL: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
+        LOG_FORMAT: text, json (default: text)
     """
-    log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
-    log_level = getattr(logging, log_level_str, logging.INFO)
-
+    log_level = get_log_level()
+    log_format = get_log_format()
+    
     # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
-
+    root = logging.getLogger()
+    root.setLevel(log_level)
+    
     # Remove existing handlers
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-
-    # Add JSON handler to stdout
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JSONFormatter())
-    root_logger.addHandler(handler)
-
-    # Configure FastAPI/Uvicorn loggers
-    for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"]:
+    for handler in root.handlers[:]:
+        root.removeHandler(handler)
+    
+    # Create console handler
+    console = logging.StreamHandler(sys.stdout)
+    console.setLevel(log_level)
+    
+    # Set formatter
+    if log_format == "json":
+        console.setFormatter(JSONFormatter())
+    else:
+        console.setFormatter(TextFormatter())
+    
+    root.addHandler(console)
+    
+    # Fix Uvicorn loggers to use our formatter
+    for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
         logger = logging.getLogger(logger_name)
         logger.setLevel(log_level)
+        logger.handlers.clear()
+        logger.propagate = True
+    
+    # Configure FastAPI logger
+    fastapi = logging.getLogger("fastapi")
+    fastapi.setLevel(log_level)
+    fastapi.propagate = True
+    
+    # Log init
+    root.info(f"Logging: level={logging.getLevelName(log_level)}, format={log_format}")
+
+
+def setup_logging() -> None:
+    """Setup logging (alias for backward compatibility)."""
+    configure_logging()

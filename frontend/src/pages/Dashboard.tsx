@@ -1,93 +1,189 @@
 /**
- * Dashboard page - View all configured RTSP streams
- * User Story 1: View Stream Dashboard
- * 
- * Displays all configured streams with real-time status indicators
- * Status updates every 2 seconds with visual feedback (green/yellow/red)
+ * Dashboard Page - Stream Overview and Management
  */
 
-import { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import Layout from '@/components/Layout'
 import StreamCard from '@/components/StreamCard'
 import EmptyState from '@/components/EmptyState'
 import { useStreams } from '@/hooks/useStreams'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { AlertCircle } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { AlertCircle, Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 export default function Dashboard() {
-  const { streams, isLoading, error, refetch } = useStreams({ autoFetch: true, pollInterval: 2000 })
+  
+  const { 
+    streams, 
+    isLoading, 
+    error, 
+    refetch, 
+    deleteStream 
+  } = useStreams({ 
+    autoFetch: true
+  })
 
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [streamToDelete, setStreamToDelete] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  // Refetch on window focus/visibility
   useEffect(() => {
-    // Set up polling for real-time status updates every 2 seconds
-    const pollInterval = setInterval(() => {
-      refetch()
-    }, 2000)
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        refetch()
+      }
+    }
 
-    return () => clearInterval(pollInterval)
+    const handleFocus = () => {
+      refetch()
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleFocus)
+    }
   }, [refetch])
+
+  const handleDeleteClick = (streamId: string) => {
+    setStreamToDelete(streamId)
+    setDeleteDialogOpen(true)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!streamToDelete) return
+
+    try {
+      setIsDeleting(true)
+      await deleteStream(streamToDelete)
+      setDeleteDialogOpen(false)
+      setStreamToDelete(null)
+    } catch (err) {
+      console.error('Failed to delete stream:', err)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  const handleCancelDelete = () => {
+    setDeleteDialogOpen(false)
+    setStreamToDelete(null)
+  }
 
   const handleRetry = () => {
     refetch()
   }
 
+  const getStreamName = (): string => {
+    if (!streamToDelete) return ''
+    const stream = streams.find(s => s.id === streamToDelete)
+    return stream?.name || 'this stream'
+  }
+
   return (
     <Layout>
-      <div className="min-h-screen">
-        {/* Page Header */}
-        <div className="bg-linear-to-br from-primary/5 to-primary/10 border-b">
-          <div className="container mx-auto px-4 py-8 md:py-12">
-            <h1 className="text-4xl md:text-5xl font-bold text-foreground mb-2">Stream Dashboard</h1>
-            <p className="text-muted-foreground">Monitor your RTSP streams in real-time</p>
-          </div>
-        </div>
-
-        {/* Main Content */}
-        <main className="container mx-auto px-4 py-8">
-          {/* Loading State */}
-          {isLoading && streams.length === 0 && (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <div className="inline-block h-12 w-12 animate-spin rounded-full border-4 border-muted border-t-primary"></div>
-                <p className="mt-4 text-muted-foreground">Loading streams...</p>
-              </div>
-            </div>
-          )}
-
-          {/* Error State */}
-          {error && streams.length === 0 && (
-            <div className="space-y-4">
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  <div className="flex flex-col gap-3">
-                    <div>{error}</div>
-                    <button
-                      onClick={handleRetry}
-                      className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-destructive text-destructive-foreground hover:bg-destructive/90 h-10 px-4 py-2 w-fit"
-                    >
-                      Retry
-                    </button>
-                  </div>
-                </AlertDescription>
-              </Alert>
-            </div>
-          )}
-
-          {/* Empty State */}
-          {!isLoading && !error && streams.length === 0 && <EmptyState />}
-
-          {/* Streams Grid */}
-          {streams.length > 0 && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-max">
-                {streams.map(stream => (
-                  <StreamCard key={stream.id} stream={stream} />
-                ))}
-              </div>
-            </div>
-          )}
-        </main>
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold mb-2">Stream Dashboard</h1>
+        <p className="text-muted-foreground">
+          Monitor your RTSP streams with static snapshots
+        </p>
       </div>
+
+      <div className="space-y-6">
+        
+        {/* Initial loading state */}
+        {isLoading && streams.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-muted-foreground">Loading streams...</p>
+          </div>
+        )}
+
+        {/* Error state */}
+        {error && streams.length === 0 && (
+          <Alert variant="destructive" className="max-w-2xl mx-auto">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription className="flex items-center justify-between">
+              <span>{error}</span>
+              <Button 
+                onClick={handleRetry} 
+                variant="outline" 
+                size="sm"
+                className="ml-4"
+              >
+                Retry
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Empty state */}
+        {!isLoading && !error && streams.length === 0 && (
+          <EmptyState />
+        )}
+
+        {/* Streams grid */}
+        {streams.length > 0 && (
+          <div className="grid gap-6 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+            {streams.map(stream => (
+              <StreamCard 
+                key={stream.id} 
+                stream={stream}
+                onDelete={handleDeleteClick}
+              />
+            ))}
+          </div>
+        )}
+        
+      </div>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Stream</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{getStreamName()}</strong>? 
+              This action cannot be undone and will stop the stream.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel 
+              onClick={handleCancelDelete}
+              disabled={isDeleting}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Layout>
   )
 }

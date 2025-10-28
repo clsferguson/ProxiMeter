@@ -17,6 +17,7 @@ import { useStreams } from '@/hooks/useStreams'
 interface StreamFormData {
   name: string
   rtsp_url: string
+  ffmpeg_params?: string | string[]
 }
 
 export default function AddStream() {
@@ -29,7 +30,12 @@ export default function AddStream() {
     try {
       setIsLoading(true)
       setError(null)
-      await createStream(data)
+      // Transform ffmpeg_params back to array if string
+      const submitData = {
+        ...data,
+        ffmpeg_params: typeof data.ffmpeg_params === 'string' ? data.ffmpeg_params.split(' ').filter(Boolean) : data.ffmpeg_params
+      }
+      await createStream(submitData)
       // Navigate back to dashboard after successful creation
       navigate('/')
     } catch (err) {

@@ -1,105 +1,295 @@
 /**
- * StreamCard Component - Individual stream card with status indicators
+ * StreamCard Component - Manual Refresh Only
  * 
- * Composes shadcn/ui primitives: Card, CardContent, CardDescription, CardHeader, CardTitle, Badge, Button
+ * Displays stream information with snapshot preview and FFmpeg parameters.
+ * NO automatic snapshot fetching. User must click refresh button.
  * 
- * Displays stream information with:
- * - Status badge (green/yellow/red) using shadcn/ui Badge with custom styling
- * - Stream name (truncated at 40 chars with tooltip)
- * - Masked RTSP URL (last 20 chars with tooltip)
- * - Action buttons (Edit, Play, Delete) using shadcn/ui Button variants
- * - Created date display
- * 
- * @component
- * @param {StreamCardProps} props - Component props
- * @param {StreamResponse} props.stream - Stream object with id, name, rtsp_url, status, created_at
- * @returns {JSX.Element} Rendered stream card
- * 
- * @example
- * <StreamCard stream={stream} />
+ * Shows FFmpeg params from stream config or backend defaults (single source of truth).
  */
 
 import { Link } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Edit2, Play, Trash2, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
+import { Edit2, Play, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw, Camera, Code2 } from 'lucide-react'
 import type { StreamResponse } from '@/lib/types'
 import { truncateText, maskRtspUrl } from '@/lib/utils'
+import { API_BASE_URL } from '@/lib/constants'
+import { useState, useEffect } from 'react'
+import type { ReactElement } from 'react'
+import { getFfmpegDefaults } from '@/hooks/useApi'
 
 interface StreamCardProps {
   stream: StreamResponse
+  onDelete?: (streamId: string) => void
 }
 
-export default function StreamCard({ stream }: StreamCardProps) {
-  // Determine status color based on stream status
-  const getStatusBadge = () => {
-    switch (stream.status) {
-      case 'Active':
-        return (
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-              <CheckCircle2 className="h-3 w-3 mr-1" />
-              Active
-            </Badge>
-          </div>
-        )
-      case 'Inactive':
-        return (
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-              <AlertCircle className="h-3 w-3 mr-1" />
-              Inactive
-            </Badge>
-          </div>
-        )
-      default:
-        return (
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
-              <Clock className="h-3 w-3 mr-1" />
-              Pending
-            </Badge>
-          </div>
-        )
+function getStatusBadge(status: string): ReactElement {
+  const normalizedStatus = status.toLowerCase()
+
+  if (normalizedStatus === 'active' || normalizedStatus === 'running') {
+    return (
+      <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-400 dark:border-green-800">
+        <CheckCircle2 className="h-3 w-3 mr-1" />
+        Active
+      </Badge>
+    )
+  }
+
+  if (normalizedStatus === 'inactive' || normalizedStatus === 'stopped') {
+    return (
+      <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800">
+        <AlertCircle className="h-3 w-3 mr-1" />
+        Inactive
+      </Badge>
+    )
+  }
+
+  return (
+    <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-950 dark:text-yellow-400 dark:border-yellow-800">
+      <Clock className="h-3 w-3 mr-1" />
+      Pending
+    </Badge>
+  )
+}
+
+function StreamCard({ stream, onDelete }: StreamCardProps) {
+  
+  // ========================================================================
+  // State Management
+  // ========================================================================
+  
+  const [snapshotKey, setSnapshotKey] = useState(0)
+  const [imageError, setImageError] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [ffmpegDefaults, setFfmpegDefaults] = useState<string | null>(null)
+  const [showFullParams, setShowFullParams] = useState(false)
+
+  // ========================================================================
+  // Computed Values
+  // ========================================================================
+  
+  const truncatedName = truncateText(stream.name, 40)
+  const maskedUrl = maskRtspUrl(stream.rtsp_url)
+  const displayUrl = maskedUrl.length > 20 ? '...' + maskedUrl.slice(-20) : maskedUrl
+  const createdDate = new Date(stream.created_at).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  })
+
+  const snapshotUrl = stream.status === 'running' && snapshotKey > 0
+    ? `${API_BASE_URL}/streams/${stream.id}/snapshot?t=${snapshotKey}`
+    : null
+
+  // Determine which FFmpeg params to display
+  const ffmpegParamsToDisplay = stream.ffmpeg_params.length > 0 
+    ? stream.ffmpeg_params.join(' ')
+    : (ffmpegDefaults || 'Loading defaults...')
+  
+  const isUsingDefaults = stream.ffmpeg_params.length === 0
+
+  // ========================================================================
+  // Effects
+  // ========================================================================
+  
+  /**
+   * Fetch FFmpeg defaults from backend on mount.
+   * This establishes the single source of truth for default parameters.
+   */
+  useEffect(() => {
+    let mounted = true
+    
+    const fetchDefaults = async () => {
+      try {
+        const data = await getFfmpegDefaults()
+        if (mounted) {
+          setFfmpegDefaults(data.combined_params)
+        }
+      } catch (err) {
+        console.error('Failed to fetch FFmpeg defaults:', err)
+        if (mounted) {
+          setFfmpegDefaults('Error loading defaults')
+        }
+      }
+    }
+    
+    fetchDefaults()
+    
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  // ========================================================================
+  // Event Handlers
+  // ========================================================================
+  
+  const handleDelete = () => {
+    if (onDelete) {
+      onDelete(stream.id)
     }
   }
 
-  const truncatedName = truncateText(stream.name, 40)
-  const maskedUrl = maskRtspUrl(stream.rtsp_url)
-  // Show last 20 chars of masked URL
-  const displayUrl =
-    maskedUrl.length > 20 ? '...' + maskedUrl.slice(-20) : maskedUrl
+  const handleRefreshSnapshot = async () => {
+    setIsRefreshing(true)
+    setImageError(false)
+    setSnapshotKey(prev => prev + 1)
+    
+    setTimeout(() => {
+      setIsRefreshing(false)
+    }, 500)
+  }
 
+  const handleImageError = () => {
+    setImageError(true)
+    setIsRefreshing(false)
+  }
+
+  const handleImageLoad = () => {
+    setIsRefreshing(false)
+  }
+
+  const toggleShowFullParams = () => {
+    setShowFullParams(prev => !prev)
+  }
+
+  // ========================================================================
+  // Render
+  // ========================================================================
+  
   return (
-    <Card className="flex flex-col h-full hover:shadow-md transition-shadow">
+    <Card className="flex flex-col h-full hover:shadow-lg transition-all duration-200">
+      
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <CardTitle className="text-lg truncate" title={stream.name}>
+            <CardTitle className="text-lg truncate font-semibold" title={stream.name}>
               {truncatedName}
             </CardTitle>
-            <CardDescription className="text-xs mt-1 truncate" title={maskedUrl}>
+            <CardDescription className="text-xs mt-1 truncate font-mono" title={maskedUrl}>
               {displayUrl}
             </CardDescription>
           </div>
-          {getStatusBadge()}
+          <div className="shrink-0">
+            {getStatusBadge(stream.status)}
+          </div>
         </div>
       </CardHeader>
 
       <CardContent className="flex-1 space-y-4 pb-4">
-        {/* Stream Details */}
+        
+        {/* Stream Info */}
         <div className="space-y-2 text-sm">
           <div className="flex justify-between items-center">
             <span className="text-muted-foreground">Status:</span>
-            <span className="font-medium">{stream.status}</span>
+            <span className="font-medium capitalize">{stream.status}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-muted-foreground">Created:</span>
-            <span className="font-medium text-xs">
-              {new Date(stream.created_at).toLocaleDateString()}
-            </span>
+            <span className="font-medium text-xs">{createdDate}</span>
           </div>
+          
+          {/* FFmpeg Parameters Display */}
+          <div className="flex flex-col gap-1 pt-1">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1">
+                <Code2 className="h-3 w-3 text-muted-foreground" />
+                <span className="text-muted-foreground text-xs">FFmpeg Params:</span>
+              </div>
+              {isUsingDefaults && (
+                <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                  defaults
+                </Badge>
+              )}
+            </div>
+            <div className="relative">
+              <code 
+                className={`block text-[10px] font-mono bg-muted px-2 py-1.5 rounded break-all leading-relaxed ${
+                  !showFullParams && ffmpegParamsToDisplay.length > 60 ? 'line-clamp-2' : ''
+                }`}
+              >
+                {ffmpegParamsToDisplay}
+              </code>
+              {ffmpegParamsToDisplay.length > 60 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 text-[10px] px-1 py-0 mt-1"
+                  onClick={toggleShowFullParams}
+                >
+                  {showFullParams ? 'Show less' : 'Show more'}
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Snapshot preview */}
+        <div className="relative w-full aspect-video bg-black rounded-md overflow-hidden">
+          {stream.status === 'running' && snapshotUrl && !imageError ? (
+            <>
+              <img
+                src={snapshotUrl}
+                alt={`${stream.name} snapshot`}
+                className="w-full h-full object-contain"
+                onError={handleImageError}
+                onLoad={handleImageLoad}
+              />
+              
+              <Button
+                size="sm"
+                variant="ghost"
+                className="absolute bottom-2 right-2 h-8 w-8 p-0 bg-black/50 hover:bg-black/70 text-white"
+                onClick={handleRefreshSnapshot}
+                disabled={isRefreshing}
+                title="Refresh snapshot"
+              >
+                <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              </Button>
+
+              {isRefreshing && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                  <RefreshCw className="h-8 w-8 text-white animate-spin" />
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-muted">
+              <div className="text-center space-y-3">
+                {stream.status === 'running' && snapshotKey === 0 ? (
+                  // Stream running but user hasn't clicked refresh yet
+                  <>
+                    <Camera className="h-8 w-8 mx-auto text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Click refresh to capture snapshot</p>
+                    <Button size="sm" variant="outline" onClick={handleRefreshSnapshot} disabled={isRefreshing}>
+                      <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      Capture Snapshot
+                    </Button>
+                  </>
+                ) : stream.status === 'running' && imageError ? (
+                  // Stream running but snapshot failed
+                  <>
+                    <AlertCircle className="h-8 w-8 mx-auto text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Failed to load</p>
+                    <Button size="sm" variant="outline" onClick={handleRefreshSnapshot} disabled={isRefreshing}>
+                      <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      Retry
+                    </Button>
+                  </>
+                ) : (
+                  // Stream not running
+                  <>
+                    <Camera className="h-8 w-8 mx-auto text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">No preview available</p>
+                    <p className="text-xs text-muted-foreground px-4">
+                      Start the stream to capture snapshots
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Action Buttons */}
@@ -118,7 +308,12 @@ export default function StreamCard({ stream }: StreamCardProps) {
               </Button>
             </Link>
           </div>
-          <Button size="sm" variant="ghost" className="w-full text-destructive hover:text-destructive hover:bg-destructive/10">
+          <Button 
+            size="sm" 
+            variant="ghost" 
+            className="w-full text-destructive hover:text-destructive hover:bg-destructive/10"
+            onClick={handleDelete}
+          >
             <Trash2 className="h-4 w-4 mr-1" />
             Delete
           </Button>
@@ -127,3 +322,5 @@ export default function StreamCard({ stream }: StreamCardProps) {
     </Card>
   )
 }
+
+export default StreamCard

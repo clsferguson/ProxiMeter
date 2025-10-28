@@ -1,151 +1,228 @@
-"""RTSP utilities for playback and frame generation."""
+"""RTSP stream utilities for FFmpeg-based processing.
+
+FFmpeg-only utilities for RTSP stream validation and command generation.
+No OpenCV VideoCapture - all stream processing uses FFmpeg with GPU acceleration.
+
+Constitution Compliance:
+    Principle II: FFmpeg handles ALL RTSP ingestion, decoding, frame extraction
+    Principle III: GPU backend contract with hardware acceleration
+    Principle IV: Security controls with input validation
+
+Logging Strategy:
+    DEBUG - Command building, probe results, validation details
+    WARN  - Invalid URLs, security violations, GPU mismatches
+    ERROR - Probe failures, exceptions
+
+FFmpeg Pipeline:
+    RTSP → FFmpeg (GPU decode) → MJPEG stdout → Parse frames → Web/API
+"""
+from __future__ import annotations
+
+import asyncio
 import logging
-from typing import AsyncGenerator, Optional
+import subprocess
+from typing import Final
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# Constants
+# ============================================================================
 
-async def generate_mjpeg_stream(
-    rtsp_url: str, 
-    max_fps: float = 5.0,
-    stream_id: Optional[str] = None
-) -> AsyncGenerator[bytes, None]:
-    """Generate MJPEG frames from RTSP stream at specified FPS cap.
+DEFAULT_PROBE_TIMEOUT: Final[float] = 5.0
+"""Default RTSP probe timeout in seconds."""
+
+FORBIDDEN_SHELL_CHARS: Final[set[str]] = {";", "&", "|", ">", "<", "`", "$", "\n", "\r"}
+"""Shell metacharacters forbidden for security."""
+
+# ============================================================================
+# FFmpeg Command Building
+# ============================================================================
+
+def build_ffmpeg_command(
+    rtsp_url: str,
+    ffmpeg_params: list[str],
+    gpu_backend: str | None = None
+) -> list[str]:
+    """Build FFmpeg command for RTSP processing with GPU acceleration.
+    
+    Command structure:
+    1. User params (can override defaults)
+    2. Input (-i rtsp://...)
+    3. FPS limiter (-r 5)
+    4. GPU download filter (if using GPU)
+    5. MJPEG output to stdout
     
     Args:
-        rtsp_url: RTSP URL to decode
-        max_fps: Maximum frames per second (default 5.0)
-        stream_id: Optional stream ID for status persistence on failure
+        rtsp_url: RTSP URL to process
+        ffmpeg_params: User-provided parameters (validated)
+        gpu_backend: GPU backend (nvidia/amd/intel/none)
         
-    Yields:
-        JPEG frame bytes with multipart boundary
+    Returns:
+        Command list for subprocess.run()
         
-    Raises:
-        RuntimeError: If stream cannot be opened or fails during playback
+    Example:
+        >>> cmd = build_ffmpeg_command(
+        ...     "rtsp://cam/stream",
+        ...     ["-rtsp_transport", "tcp"],
+        ...     "nvidia"
+        ... )
     """
-    import cv2
-    import asyncio
-    import time
-    from concurrent.futures import ThreadPoolExecutor
+    cmd = ["ffmpeg"]
     
-    cap = None
-    frame_interval = 1.0 / max_fps  # Time between frames in seconds
+    logger.debug(f"Building FFmpeg command: GPU={gpu_backend}, input_params={len(ffmpeg_params)}")
     
-    async def _mark_stream_inactive():
-        """Mark stream as inactive in config on failure."""
-        if stream_id:
-            try:
-                from ..config_io import load_streams, save_streams
-                streams = load_streams()
-                for stream in streams:
-                    if stream.get("id") == stream_id and stream.get("status") != "Inactive":
-                        stream["status"] = "Inactive"
-                        save_streams(streams)
-                        logger.warning(f"Marked stream {stream_id} as Inactive due to playback failure")
-                        break
-            except Exception as e:
-                logger.error(f"Failed to mark stream {stream_id} as Inactive: {e}")
+    # User params first (allows override)
+    cmd.extend(ffmpeg_params)
     
-    try:
-        # Open RTSP stream
-        cap = cv2.VideoCapture(rtsp_url)
-        if not cap.isOpened():
-            raise RuntimeError(f"Failed to open RTSP stream: {rtsp_url}")
-        
-        logger.info(f"Started MJPEG stream for {rtsp_url} at max {max_fps} FPS")
-        
-        last_frame_time = 0.0
-        
-        while True:
-            current_time = time.time()
-            
-            # Throttle to max FPS
-            time_since_last_frame = current_time - last_frame_time
-            if time_since_last_frame < frame_interval:
-                await asyncio.sleep(frame_interval - time_since_last_frame)
-                current_time = time.time()
-            
-            # Read frame in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                ret, frame = await loop.run_in_executor(executor, cap.read)
-            
-            if not ret or frame is None:
-                logger.warning(f"Failed to read frame from {rtsp_url}")
-                raise RuntimeError("Stream ended or failed to read frame")
-            
-            # Encode frame as JPEG
-            ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            if not ret:
-                logger.warning(f"Failed to encode frame as JPEG for {rtsp_url}")
-                continue
-            
-            # Yield frame with multipart boundary
-            frame_bytes = jpeg.tobytes()
-            yield (
-                b'--frame\r\n'
-                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n'
-            )
-            
-            last_frame_time = current_time
-            
-    except Exception as e:
-        logger.error(f"MJPEG stream error for {rtsp_url}: {e}")
-        # Mark stream as inactive on failure
-        await _mark_stream_inactive()
-        raise RuntimeError(f"Stream playback failed: {e}")
-    finally:
-        if cap is not None:
-            cap.release()
-            logger.info(f"Released RTSP stream: {rtsp_url}")
+    # Input
+    cmd.extend(["-i", rtsp_url])
+    
+    # Force 5fps output (constitution requirement)
+    cmd.extend(["-r", "5"])
+    
+    # GPU download filter if using hardware acceleration
+    if gpu_backend and gpu_backend != "none":
+        cmd.extend(["-vf", "hwdownload,format=nv12"])
+        logger.debug(f"Added GPU download filter for {gpu_backend}")
+    
+    # MJPEG output to stdout
+    cmd.extend([
+        "-c:v", "mjpeg",
+        "-q:v", "3",  # Quality 3 (high quality, 1-31 scale)
+        "-f", "mjpeg",
+        "-"  # stdout
+    ])
+    
+    logger.debug(f"FFmpeg command ({len(cmd)} total params): {' '.join(cmd)}")
+    return cmd
 
 
-async def probe_rtsp_stream(rtsp_url: str, timeout_seconds: float = 2.0) -> bool:
-    """Probe RTSP stream to check connectivity.
+# ============================================================================
+# RTSP Stream Probing
+# ============================================================================
+
+async def probe_rtsp_stream(
+    rtsp_url: str,
+    timeout_seconds: float = DEFAULT_PROBE_TIMEOUT
+) -> bool:
+    """Probe RTSP stream connectivity using ffprobe.
     
-    Attempts to read a single frame to verify the stream is reachable.
+    Verifies stream is accessible and decodable without processing frames.
     
     Args:
         rtsp_url: RTSP URL to probe
-        timeout_seconds: Timeout for probe attempt (default 2.0)
+        timeout_seconds: Probe timeout (default: 5.0)
         
     Returns:
-        True if stream is reachable, False otherwise
+        True if accessible, False otherwise
     """
-    import cv2
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-    
-    def _probe_sync():
-        """Synchronous probe function to run in thread pool."""
-        cap = None
-        try:
-            cap = cv2.VideoCapture(rtsp_url)
-            if not cap.isOpened():
-                return False
-            
-            # Try to read a single frame
-            ret, frame = cap.read()
-            return ret and frame is not None
-        except Exception as e:
-            logger.debug(f"RTSP probe failed for {rtsp_url}: {e}")
-            return False
-        finally:
-            if cap is not None:
-                cap.release()
-    
     try:
-        # Run blocking OpenCV call in thread pool with timeout
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            result = await asyncio.wait_for(
-                loop.run_in_executor(executor, _probe_sync),
+        cmd = [
+            "ffprobe",
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_streams",
+            "-rtsp_transport", "tcp",
+            "-timeout", str(int(timeout_seconds * 1000000)),  # microseconds
+            rtsp_url
+        ]
+        
+        logger.debug(f"Probing RTSP stream: {rtsp_url}")
+        
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
                 timeout=timeout_seconds
             )
-            return result
-    except asyncio.TimeoutError:
-        logger.debug(f"RTSP probe timeout for {rtsp_url}")
-        return False
+            
+            if process.returncode == 0 and stdout:
+                logger.debug(f"Probe successful: {rtsp_url}")
+                return True
+            
+            if stderr:
+                error_msg = stderr.decode().strip()
+                logger.debug(f"Probe failed: {error_msg}")
+            
+            return False
+            
+        except asyncio.TimeoutError:
+            logger.debug(f"Probe timeout after {timeout_seconds}s")
+            process.kill()
+            await process.wait()
+            return False
+            
     except Exception as e:
-        logger.debug(f"RTSP probe error for {rtsp_url}: {e}")
+        logger.debug(f"Probe error: {e}")
         return False
+
+
+# ============================================================================
+# Validation
+# ============================================================================
+
+def validate_rtsp_url(url: str, params: list[str], gpu_backend: str) -> bool:
+    """Validate RTSP URL and FFmpeg params for security and compatibility.
+    
+    Checks:
+    - URL format and protocol (rtsp:// or rtsps://)
+    - Shell injection risks in parameters
+    - GPU parameter compatibility
+    
+    Args:
+        url: RTSP URL to validate
+        params: FFmpeg parameters
+        gpu_backend: Detected GPU (nvidia/amd/intel/none)
+        
+    Returns:
+        True if valid and safe
+    """
+    # Validate URL
+    if not url or not isinstance(url, str):
+        logger.warning("Invalid URL: empty or wrong type")
+        return False
+    
+    url_lower = url.lower()
+    if not url_lower.startswith(("rtsp://", "rtsps://")):
+        logger.warning(f"Invalid scheme: {url[:20]}")
+        return False
+    
+    # Parse URL structure
+    try:
+        parsed = urlparse(url)
+        if not parsed.netloc:
+            logger.warning("URL missing host")
+            return False
+    except Exception as e:
+        logger.warning(f"URL parse failed: {e}")
+        return False
+    
+    # Validate params
+    for param in params:
+        if not isinstance(param, str):
+            logger.warning(f"Invalid param type: {type(param)}")
+            return False
+        
+        # Check shell injection risks
+        if any(char in param for char in FORBIDDEN_SHELL_CHARS):
+            logger.warning(f"Forbidden char in param: {param}")
+            return False
+    
+    # Warn if GPU params but no GPU
+    if gpu_backend == "none":
+        gpu_flags = {"-hwaccel", "-hwaccel_output_format", "-c:v"}
+        if any(any(flag in param for flag in gpu_flags) for param in params):
+            logger.warning("GPU params used but no GPU detected")
+            return False
+    
+    return True
+
+
+logger.debug("RTSP utilities module loaded")
