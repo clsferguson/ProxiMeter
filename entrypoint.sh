@@ -55,7 +55,7 @@ if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
     # dpkg -i cuda-keyring_1.1-1_all.deb
     # rm cuda-keyring_1.1-1_all.deb
 
-    # if ! dpkg -l | grep -q libnvcuvid1; then
+    if ! dpkg -l | grep -q libnvcuvid1; then
     #     install_packages \
     #         libnvcuvid1 \
     #         libnvidia-encode1
