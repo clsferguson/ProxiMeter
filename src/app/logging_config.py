@@ -238,6 +238,7 @@ def configure_logging() -> None:
     - Log level from LOG_LEVEL environment variable
     - Credential redaction for security
     - Proper propagation for FastAPI/Uvicorn loggers
+    - Disables Uvicorn's default formatters
     
     Environment Variables:
         LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -267,11 +268,33 @@ def configure_logging() -> None:
     
     root_logger.addHandler(console_handler)
     
-    # Configure FastAPI/Uvicorn loggers to use our format
-    for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"]:
+    # ========================================================================
+    # CRITICAL FIX: Disable Uvicorn's default logging handlers
+    # ========================================================================
+    # Uvicorn creates its own handlers with basic formatters that bypass
+    # our custom formatter. We need to remove these and let our formatter
+    # handle everything.
+    
+    uvicorn_loggers = [
+        "uvicorn",
+        "uvicorn.error", 
+        "uvicorn.access"
+    ]
+    
+    for logger_name in uvicorn_loggers:
         logger = logging.getLogger(logger_name)
         logger.setLevel(log_level)
-        logger.propagate = True  # Use root logger's handlers
+        
+        # Remove Uvicorn's default handlers
+        logger.handlers.clear()
+        
+        # Propagate to root logger (uses our formatter)
+        logger.propagate = True
+    
+    # Configure FastAPI logger
+    fastapi_logger = logging.getLogger("fastapi")
+    fastapi_logger.setLevel(log_level)
+    fastapi_logger.propagate = True
     
     # Log successful initialization
     root_logger.info(

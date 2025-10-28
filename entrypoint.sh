@@ -67,9 +67,12 @@ echo "🎯 Selected GPU Backend: $GPU_BACKEND_DETECTED"
 if [ "$DEBUG_MODE" = true ]; then
     echo ""
     echo "🔧 FFmpeg hardware acceleration methods:"
-    ffmpeg -hwaccels 2>&1 | tail -n +2 | sed 's/^/   /'
     
-    if ffmpeg -hwaccels 2>&1 | grep -qE "cuda|vaapi|qsv"; then
+    # FIXED: Use -hide_banner and grep to get clean list
+    ffmpeg -hide_banner -hwaccels 2>&1 | grep -v "^Hardware acceleration methods:" | grep -E "^\s*[a-z]" | sed 's/^/   /'
+    
+    # Check if any GPU acceleration is available
+    if ffmpeg -hide_banner -hwaccels 2>&1 | grep -qE "cuda|vaapi|qsv"; then
         echo "✅ GPU acceleration available"
     else
         echo "⚠️  No GPU acceleration in FFmpeg"
