@@ -1,126 +1,92 @@
 #!/bin/bash
 set -e
 
+# ============================================================================
+# Version Info
+# ============================================================================
 echo "=== ProxiMeter RTSP Streams ==="
-echo "Python version: $(python --version 2>&1)"
-echo "FastAPI version: $(python -c 'import fastapi; print(fastapi.__version__)' 2>/dev/null || echo 'unknown')"
-echo "Uvicorn version: $(python -c 'import uvicorn; print(uvicorn.__version__)' 2>/dev/null || echo 'unknown')"
-echo "Pydantic version: $(python -c 'import pydantic; print(pydantic.__version__)' 2>/dev/null || echo 'unknown')"
-echo "FFmpeg version: $(ffmpeg -version 2>/dev/null | head -1 || echo 'unknown')"
+echo "Python: $(python --version 2>&1)"
+echo "FastAPI: $(python -c 'import fastapi; print(fastapi.__version__)' 2>/dev/null || echo 'N/A')"
+echo "Uvicorn: $(python -c 'import uvicorn; print(uvicorn.__version__)' 2>/dev/null || echo 'N/A')"
+echo "FFmpeg: $(ffmpeg -version 2>/dev/null | head -1 || echo 'N/A')"
 echo "==============================="
 
 # ============================================================================
-# GPU Detection and Library Installation (as root)
+# GPU Detection (Runtime) - GPU-specific, must run as root
 # ============================================================================
 
 GPU_BACKEND_DETECTED="none"
 
 echo "🔍 Detecting GPU hardware..."
 
-# Check for NVIDIA GPU
+# NVIDIA GPU
 if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
     echo "✅ NVIDIA GPU detected"
     GPU_BACKEND_DETECTED="nvidia"
-    
-    # Install NVIDIA CUDA libraries at runtime
-    echo "📦 Installing NVIDIA CUDA libraries..."
-    apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        wget \
-        gnupg2 \
-        ca-certificates
-    
-    # Install NVIDIA CUDA repository keyring package (official method)
-    wget -q https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
-    dpkg -i cuda-keyring_1.1-1_all.deb
-    rm cuda-keyring_1.1-1_all.deb
-    
-    apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        libnvcuvid1 \
-        libnvidia-encode1 || echo "⚠️  Could not install some NVIDIA libraries (they may already be present from host GPU driver)"
-    
-    rm -rf /var/lib/apt/lists/*
-    echo "✅ NVIDIA libraries installed"
+    nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>/dev/null | head -1 | \
+        awk -F',' '{printf "   GPU: %s | Driver: %s\n", $1, $2}'
+    echo "   Using host NVIDIA driver libraries"
 
-# Check for AMD GPU
+# AMD GPU
 elif command -v rocm-smi &> /dev/null && rocm-smi &> /dev/null; then
     echo "✅ AMD GPU detected"
     GPU_BACKEND_DETECTED="amd"
-    
-    # Install AMD VAAPI libraries
-    echo "📦 Installing AMD VAAPI libraries..."
-    apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        va-driver-all \
-        libva-drm2 \
-        libva2 \
-        mesa-va-drivers
-    
-    rm -rf /var/lib/apt/lists/*
-    echo "✅ AMD libraries installed"
+    rocm-smi --showproductname 2>/dev/null | head -1 | sed 's/^/   /' || true
+    echo "   Using host AMD ROCm driver"
 
-# Check for Intel GPU
+# Intel GPU
 elif command -v vainfo &> /dev/null && vainfo 2>/dev/null | grep -q "VAProfile"; then
     echo "✅ Intel GPU detected"
     GPU_BACKEND_DETECTED="intel"
-    
-    # Install Intel QSV libraries
-    echo "📦 Installing Intel QSV libraries..."
-    apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        intel-media-va-driver-non-free \
-        libmfx1 \
-        vainfo || echo "⚠️  Could not install some Intel libraries"
-    
-    rm -rf /var/lib/apt/lists/*
-    echo "✅ Intel libraries installed"
+    vainfo 2>/dev/null | grep "Driver version" | sed 's/^/   /' || true
+    echo "   Using host Intel VA-API driver"
 
-elif [ -d "/dev/dri" ]; then
-    echo "ℹ️  /dev/dri detected, assuming Intel GPU"
+# Fallback: DRI devices present
+elif [ -d "/dev/dri" ] && [ "$(ls -A /dev/dri 2>/dev/null)" ]; then
+    echo "ℹ️  /dev/dri devices detected"
     GPU_BACKEND_DETECTED="intel"
-    
-    # Install Intel QSV libraries
-    echo "📦 Installing Intel QSV libraries..."
-    apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        intel-media-va-driver-non-free \
-        libmfx1 \
-        vainfo || echo "⚠️  Could not install some Intel libraries"
-    
-    rm -rf /var/lib/apt/lists/*
-    echo "✅ Intel libraries installed"
+    ls -la /dev/dri/ 2>/dev/null | grep -E "card|render" | sed 's/^/   /' || true
 
 else
-    echo "⚠️  No GPU detected - running without hardware acceleration"
-    echo "   This application requires GPU support for optimal performance"
+    echo "⚠️  No GPU detected"
+    echo "   Application requires GPU hardware acceleration"
 fi
 
 export GPU_BACKEND_DETECTED
-echo "🎯 GPU Backend: $GPU_BACKEND_DETECTED"
+echo "🎯 Selected GPU Backend: $GPU_BACKEND_DETECTED"
 
-# Verify FFmpeg has GPU support
-echo "🔧 Verifying FFmpeg GPU support..."
-ffmpeg -hwaccels 2>&1 | grep -E "cuda|vaapi|qsv" && echo "✅ GPU acceleration available" || echo "⚠️  No GPU acceleration in FFmpeg"
+# ============================================================================
+# FFmpeg GPU Capability Check
+# ============================================================================
+echo ""
+echo "🔧 FFmpeg hardware acceleration support:"
+ffmpeg -hwaccels 2>&1 | tail -n +2 | head -n -1 | sed 's/^/   /'
+
+if ffmpeg -hwaccels 2>&1 | grep -qE "cuda|vaapi|qsv"; then
+    echo "✅ GPU acceleration available"
+else
+    echo "⚠️  No GPU acceleration in FFmpeg"
+fi
 
 # ============================================================================
 # CI Dry Run Check
 # ============================================================================
-
-if [ "${CI_DRY_RUN}" = "true" ] || [ "${CI_DRY_RUN}" = "1" ] || [ "${CI_DRY_RUN}" = "yes" ]; then
-    echo "CI_DRY_RUN=true detected. Exiting without starting server."
+if [ "${CI_DRY_RUN}" = "true" ] || [ "${CI_DRY_RUN}" = "1" ]; then
+    echo ""
+    echo "CI_DRY_RUN detected - exiting without starting server"
     exit 0
 fi
 
 # ============================================================================
 # Start Application (drop to appuser)
 # ============================================================================
-
 APP_PORT="${APP_PORT:-8000}"
 export PYTHONPATH=/app/src:${PYTHONPATH}
 
-echo "👤 Switching to appuser..."
-echo "🌐 Starting FastAPI server on 0.0.0.0:${APP_PORT}..."
+echo ""
+echo "👤 Dropping privileges to appuser..."
+echo "🌐 Starting FastAPI on 0.0.0.0:${APP_PORT}..."
+echo ""
 
-# Drop privileges to appuser and start the app
+# Drop to appuser and start app
 exec su -s /bin/bash -c "exec uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT}" appuser
