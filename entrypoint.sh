@@ -29,9 +29,9 @@ echo "🔍 Detecting GPU hardware..."
 # Function to install packages quietly
 install_packages() {
     if [ "$DEBUG_MODE" = true ]; then
-        apt update && apt install -y --no-install-recommends "$@"
+        apt-get update && apt-get install -y --no-install-recommends "$@"
     else
-        apt update >/dev/null 2>&1 && apt install -y --no-install-recommends "$@" >/dev/null 2>&1
+        apt-get update >/dev/null 2>&1 && apt-get install -y --no-install-recommends "$@" >/dev/null 2>&1
     fi
 }
 
@@ -47,12 +47,19 @@ if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
 
     # Install NVIDIA CUDA libraries for FFmpeg
     echo "   📦 Installing NVIDIA CUDA libraries..."
+
+    install_packages \
+        gnupg2
+
+    wget -q https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
+    dpkg -i cuda-keyring_1.1-1_all.deb
+    rm cuda-keyring_1.1-1_all.deb
+
     if ! dpkg -l | grep -q libnvcuvid1; then
         install_packages \
             libnvcuvid1 \
-            libnvidia-encode1 \
-            cuda-nvcc-12-6 \
-            cuda-cudart-12-6
+            libnvidia-encode1
+        rm -rf /var/lib/apt/lists/*
         echo "   ✅ NVIDIA libraries installed"
     else
         echo "   ✅ NVIDIA libraries already installed"

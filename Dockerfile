@@ -32,7 +32,7 @@ WORKDIR /app
 
 # Install universal system dependencies (no GPU-specific packages)
 # These are needed regardless of GPU vendor
-RUN apt update && apt install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     # FFmpeg with all GPU backends compiled in
     ffmpeg \
     # OpenCV dependencies
@@ -77,8 +77,8 @@ VOLUME ["/app/config"]
 EXPOSE ${APP_PORT}
 
 # Health check (uses wget already installed)
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:${APP_PORT}/health || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:${APP_PORT}/health/live || exit 1
 
 # Entrypoint handles GPU detection and switching to appuser
 ENTRYPOINT ["/app/entrypoint.sh"]
