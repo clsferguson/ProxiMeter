@@ -498,7 +498,26 @@ class StreamsService:
             
             logger.debug(f"FFmpeg process started with PID: {process.pid}")
 
-            # Wait a moment for process to initialize
+            # Add to active_processes IMMEDIATELY after process starts
+            self.active_processes[stream_id] = {
+                "process": process,
+                "buffer": bytearray(),
+            }
+
+            # Start stderr monitor ONCE, right after adding to active_processes
+            asyncio.create_task(self._monitor_ffmpeg_stderr(stream_id, process))
+
+            # Update status ONCE, before validation wait
+            config = load_streams()
+            streams = config.get("streams", [])
+            for s in streams:
+                if s.get("id") == stream_id:
+                    s["status"] = "running"
+                    break
+            config["streams"] = streams
+            save_streams(config)
+
+            # Wait briefly for process to initialize
             await asyncio.sleep(0.5)
             
             # Check if process died immediately
@@ -520,27 +539,22 @@ class StreamsService:
                 print(error_msg, flush=True)
                 print(f"{'='*80}\n", flush=True)
                 
+                # Cleanup on immediate failure
+                self.active_processes.pop(stream_id, None)
+                
+                # Update status back to stopped
+                config = load_streams()
+                streams = config.get("streams", [])
+                for s in streams:
+                    if s.get("id") == stream_id:
+                        s["status"] = "stopped"
+                        break
+                config["streams"] = streams
+                save_streams(config)
+                
                 raise RuntimeError(f"FFmpeg failed to start (code {process.returncode}): {error_msg}")
             
-            # FFmpeg started successfully - create background task to monitor stderr
-            asyncio.create_task(self._monitor_ffmpeg_stderr(stream_id, process))
-            
-            # Store process info
-            self.active_processes[stream_id] = {
-                "process": process,
-                "buffer": bytearray(),
-            }
-            
-            # Update status in config
-            config = load_streams()
-            streams = config.get("streams", [])
-            for s in streams:
-                if s.get("id") == stream_id:
-                    s["status"] = "running"
-                    break
-            config["streams"] = streams
-            save_streams(config)
-            
+            # FFmpeg started successfully
             logger.info(f"✅ Successfully started stream {stream_id} (PID: {process.pid}, GPU: {self.gpu_backend})")
             return True
             
@@ -551,7 +565,21 @@ class StreamsService:
             if stream_id in self.active_processes:
                 self.active_processes.pop(stream_id)
             
+            # Update status to stopped on failure
+            try:
+                config = load_streams()
+                streams = config.get("streams", [])
+                for s in streams:
+                    if s.get("id") == stream_id:
+                        s["status"] = "stopped"
+                        break
+                config["streams"] = streams
+                save_streams(config)
+            except Exception as config_err:
+                logger.error(f"Failed to update stream status on error: {config_err}")
+            
             return False
+
     
     async def stop_stream(self, stream_id: str) -> bool:
         """Stop FFmpeg processing for a stream.
