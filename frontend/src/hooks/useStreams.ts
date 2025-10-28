@@ -144,7 +144,7 @@ export function useStreams(options: UseStreamsOptions = {}): UseStreamsReturn {
    * - Component unmounts
    * - Streams array changes (old connections closed, new ones opened)
    */
-  useEffect(() => {
+/*   useEffect(() => {
     const eventSources: Record<string, EventSource> = {}
 
     // Create SSE connection for each running stream
@@ -180,7 +180,7 @@ export function useStreams(options: UseStreamsOptions = {}): UseStreamsReturn {
         es.close()
       })
     }
-  }, [streams]) // Only depend on streams, NOT scores (prevents infinite loop)
+  }, [streams]) // Only depend on streams, NOT scores (prevents infinite loop) */
 
   // ============================================================================
   // CRUD Operations

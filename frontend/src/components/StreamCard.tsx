@@ -1,8 +1,7 @@
 /**
- * StreamCard Component - Stream Thumbnail Display
+ * StreamCard Component - Manual Refresh Only
  * 
- * Displays a SINGLE STATIC snapshot. No auto-refresh, no overlays.
- * Only fetches snapshot when stream is running.
+ * NO automatic snapshot fetching. User must click refresh button.
  */
 
 import { Link } from 'react-router-dom'
@@ -13,7 +12,7 @@ import { Edit2, Play, Trash2, AlertCircle, CheckCircle2, Clock, RefreshCw, Camer
 import type { StreamResponse } from '@/lib/types'
 import { truncateText, maskRtspUrl } from '@/lib/utils'
 import { API_BASE_URL } from '@/lib/constants'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import type { ReactElement } from 'react'
 
 interface StreamCardProps {
@@ -56,22 +55,6 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
   const [imageError, setImageError] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
-  // ============================================================================
-  // Auto-fetch snapshot when stream becomes running
-  // ============================================================================
-  
-  useEffect(() => {
-    // If stream just became running and we haven't loaded a snapshot yet
-    if (stream.status === 'running' && snapshotKey === 0) {
-      // Wait 5 seconds for FFmpeg to start producing frames
-      const timer = setTimeout(() => {
-        setSnapshotKey(1) // Trigger first snapshot load
-      }, 5000) // CHANGED: 2000 → 5000
-      
-      return () => clearTimeout(timer)
-    }
-  }, [stream.status, snapshotKey])
-
   const truncatedName = truncateText(stream.name, 40)
   const maskedUrl = maskRtspUrl(stream.rtsp_url)
   const displayUrl = maskedUrl.length > 20 ? '...' + maskedUrl.slice(-20) : maskedUrl
@@ -81,7 +64,6 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
     day: 'numeric'
   })
 
-  // Only generate snapshot URL if stream is running
   const snapshotUrl = stream.status === 'running' && snapshotKey > 0
     ? `${API_BASE_URL}/streams/${stream.id}/snapshot?t=${snapshotKey}`
     : null
@@ -174,13 +156,16 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
             </>
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-muted">
-              <div className="text-center space-y-2">
+              <div className="text-center space-y-3">
                 {stream.status === 'running' && snapshotKey === 0 ? (
-                  // Stream just started, waiting for first frame
+                  // Stream running but user hasn't clicked refresh yet
                   <>
-                    <Camera className="h-8 w-8 mx-auto text-muted-foreground animate-pulse" />
-                    <p className="text-sm text-muted-foreground">Starting stream...</p>
-                    <p className="text-xs text-muted-foreground">Please wait ~5 seconds</p>
+                    <Camera className="h-8 w-8 mx-auto text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Click refresh to capture snapshot</p>
+                    <Button size="sm" variant="outline" onClick={handleRefreshSnapshot} disabled={isRefreshing}>
+                      <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      Capture Snapshot
+                    </Button>
                   </>
                 ) : stream.status === 'running' && imageError ? (
                   // Stream running but snapshot failed
@@ -198,7 +183,7 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
                     <Camera className="h-8 w-8 mx-auto text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">No preview available</p>
                     <p className="text-xs text-muted-foreground px-4">
-                      Stream must be running to capture snapshots
+                      Start the stream to capture snapshots
                     </p>
                   </>
                 )}
@@ -210,13 +195,13 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
         <div className="flex flex-col gap-2 pt-2">
           <div className="flex gap-2">
             <Link to={`/play/${stream.id}`} className="flex-1">
-              <Button size="sm" className="w-full" variant="default" title="View live stream">
+              <Button size="sm" className="w-full" variant="default">
                 <Play className="h-4 w-4 mr-1" />
                 Play
               </Button>
             </Link>
             <Link to={`/edit/${stream.id}`} className="flex-1">
-              <Button size="sm" variant="outline" className="w-full" title="Edit stream">
+              <Button size="sm" variant="outline" className="w-full">
                 <Edit2 className="h-4 w-4 mr-1" />
                 Edit
               </Button>
@@ -227,7 +212,6 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
             variant="ghost" 
             className="w-full text-destructive hover:text-destructive hover:bg-destructive/10"
             onClick={handleDelete}
-            title="Delete stream"
           >
             <Trash2 className="h-4 w-4 mr-1" />
             Delete
