@@ -489,6 +489,14 @@ class StreamsService:
             logger.debug(f"FFmpeg command: {' '.join(cmd)}")
             logger.debug(f"GPU backend: {self.gpu_backend}, HW accel: {hw_accel}")
 
+            # PRE-REGISTER stream immediately (before subprocess creation)
+            # This ensures get_frame() won't fail even if subprocess takes time
+            self.active_processes[stream_id] = {
+                "process": None,  # Will be filled in after subprocess starts
+                "buffer": bytearray(),
+            }
+            logger.debug(f"Pre-registered stream {stream_id} in active_processes")
+
             # Start subprocess with stdout pipe
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -498,16 +506,14 @@ class StreamsService:
             
             logger.debug(f"FFmpeg process started with PID: {process.pid}")
 
-            # Add to active_processes IMMEDIATELY after process starts
-            self.active_processes[stream_id] = {
-                "process": process,
-                "buffer": bytearray(),
-            }
+            # Update with actual process handle
+            self.active_processes[stream_id]["process"] = process
+            logger.debug(f"Updated stream {stream_id} with process PID: {process.pid}")
 
-            # Start stderr monitor ONCE, right after adding to active_processes
+            # Start stderr monitor
             asyncio.create_task(self._monitor_ffmpeg_stderr(stream_id, process))
 
-            # Update status ONCE, before validation wait
+            # Update status in config
             config = load_streams()
             streams = config.get("streams", [])
             for s in streams:
