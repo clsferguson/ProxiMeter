@@ -1,4 +1,26 @@
-"""Rate limiting middleware using token bucket algorithm."""
+"""Rate limiting middleware using token bucket algorithm.
+
+Protects the API from abuse by limiting mutating operations (POST/PUT/PATCH/DELETE)
+per client IP. Read operations (GET) are not rate limited.
+
+Token Bucket Algorithm:
+    - Each client has a bucket that fills at a constant rate
+    - Bucket has maximum capacity (burst size)
+    - Each request consumes 1 token from bucket
+    - Request allowed if bucket has ≥1 token
+    - Request denied if bucket is empty
+
+Logging Strategy:
+    DEBUG - Token bucket operations, exempt path checks
+    INFO  - Middleware initialization, configuration
+    WARN  - Rate limit violations with client IP
+
+Features:
+    - Per-IP rate limiting
+    - Burst support for legitimate spikes
+    - Health/metrics endpoint exemption
+    - Proxy header support (X-Forwarded-For, X-Real-IP)
+"""
 from __future__ import annotations
 
 import logging
@@ -13,49 +35,37 @@ from starlette.types import ASGIApp
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================================
 # Constants
 # ============================================================================
 
-# HTTP methods that trigger rate limiting
+# HTTP methods that trigger rate limiting (mutating operations only)
 RATE_LIMITED_METHODS: Final[set[str]] = {"POST", "PUT", "PATCH", "DELETE"}
 
-# Paths exempt from rate limiting
+# Paths exempt from rate limiting (health checks, metrics)
 EXEMPT_PATHS: Final[set[str]] = {"/health", "/metrics", "/api/health"}
-
 
 # ============================================================================
 # Rate Limit Middleware
 # ============================================================================
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Token bucket rate limiter for mutating HTTP requests.
+    """Token bucket rate limiter for API abuse prevention.
     
-    Features:
-    - Applies only to POST, PUT, PATCH, DELETE methods
-    - Uses client IP address as rate limit key
-    - Token bucket algorithm for smooth rate limiting
-    - Exempts health/metrics endpoints
-    - Supports X-Forwarded-For for proxy scenarios
-    
-    Token Bucket Algorithm:
-        - Each client has a bucket with a maximum capacity (burst)
-        - Tokens are added to bucket at a constant rate
-        - Each request consumes 1 token
-        - Request is allowed if bucket has ≥1 token
+    Only rate limits mutating operations (POST/PUT/PATCH/DELETE).
+    Read operations (GET) are unrestricted for streaming and browsing.
     
     Args:
         app: ASGI application
         requests_per_second: Token refill rate (default: 5.0)
-        burst: Maximum bucket capacity (default: 10)
+        burst: Maximum token capacity (default: 10)
         
     Example:
-        app.add_middleware(
-            RateLimitMiddleware,
-            requests_per_second=5.0,
-            burst=10
-        )
+        >>> app.add_middleware(
+        ...     RateLimitMiddleware,
+        ...     requests_per_second=5.0,
+        ...     burst=10
+        ... )
     """
     
     def __init__(
@@ -64,12 +74,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         requests_per_second: float = 5.0,
         burst: int = 10
     ) -> None:
-        """Initialize rate limit middleware.
+        """Initialize rate limit middleware with token bucket parameters.
         
         Args:
             app: ASGI application
-            requests_per_second: Maximum requests per second per client
-            burst: Maximum burst size (tokens in bucket)
+            requests_per_second: Token refill rate (tokens/second)
+            burst: Maximum tokens in bucket
         """
         super().__init__(app)
         self.rate = requests_per_second
@@ -80,9 +90,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             lambda: (float(burst), time.time())
         )
         
-        logger.info(
-            f"Rate limiter initialized: {requests_per_second} req/s, burst={burst}"
-        )
+        logger.info(f"Rate limiter initialized: {requests_per_second} req/s, burst={burst}")
+        logger.debug(f"Rate limiting methods: {RATE_LIMITED_METHODS}")
+        logger.debug(f"Exempt paths: {EXEMPT_PATHS}")
     
     async def dispatch(
         self,
@@ -96,51 +106,38 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             call_next: Next middleware or route handler
             
         Returns:
-            Response from handler or 429 rate limit error
+            Response from handler or 429 if rate limited
         """
-        # Check if path is exempt
-        if self._is_exempt_path(request.url.path):
+        # Skip rate limiting for exempt paths (health checks, metrics)
+        if request.url.path in EXEMPT_PATHS:
+            logger.debug(f"Exempt path: {request.url.path}")
             return await call_next(request)
         
-        # Only rate limit mutating methods
+        # Only rate limit mutating methods (POST, PUT, PATCH, DELETE)
+        # GET requests are unlimited (needed for streaming)
         if request.method not in RATE_LIMITED_METHODS:
+            logger.debug(f"Non-rate-limited method: {request.method}")
             return await call_next(request)
         
-        # Check rate limit
+        # Check rate limit for this client
         client_ip = self._get_client_ip(request)
         
         if not self._check_rate_limit(client_ip):
-            logger.warning(
-                f"Rate limit exceeded: {client_ip} {request.method} {request.url.path}"
-            )
+            logger.warning(f"Rate limit exceeded: {client_ip} {request.method} {request.url.path}")
             return self._rate_limit_response()
         
-        # Process request
+        logger.debug(f"Rate limit OK: {client_ip} {request.method} {request.url.path}")
         return await call_next(request)
-    
-    def _is_exempt_path(self, path: str) -> bool:
-        """Check if path is exempt from rate limiting.
-        
-        Args:
-            path: Request path
-            
-        Returns:
-            True if path is exempt
-        """
-        # Check exact match
-        if path in EXEMPT_PATHS:
-            return True
-        
-        # Check for MJPEG streaming endpoints
-        if "/mjpeg" in path:
-            return True
-        
-        return False
     
     def _get_client_ip(self, request: Request) -> str:
         """Extract client IP address from request.
         
-        Handles proxied requests by checking X-Forwarded-For header.
+        Handles proxied requests by checking proxy headers first.
+        
+        Priority:
+        1. X-Forwarded-For (standard proxy header)
+        2. X-Real-IP (alternative proxy header)
+        3. request.client.host (direct connection)
         
         Args:
             request: FastAPI request
@@ -148,35 +145,37 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         Returns:
             Client IP address or "unknown" if unavailable
         """
-        # Try X-Forwarded-For first (for proxied requests)
+        # Check X-Forwarded-For (standard proxy header)
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
-            # Take first IP in comma-separated list
-            return forwarded.split(",")[0].strip()
+            # Take first IP in comma-separated list (original client)
+            client_ip = forwarded.split(",")[0].strip()
+            logger.debug(f"Client IP from X-Forwarded-For: {client_ip}")
+            return client_ip
         
-        # Try X-Real-IP (alternative proxy header)
+        # Check X-Real-IP (alternative proxy header)
         real_ip = request.headers.get("X-Real-IP")
         if real_ip:
-            return real_ip.strip()
+            client_ip = real_ip.strip()
+            logger.debug(f"Client IP from X-Real-IP: {client_ip}")
+            return client_ip
         
-        # Fall back to direct client connection
+        # Direct connection
         if request.client:
+            logger.debug(f"Client IP from direct connection: {request.client.host}")
             return request.client.host
         
+        logger.warning("Unable to determine client IP")
         return "unknown"
     
     def _check_rate_limit(self, client_ip: str) -> bool:
         """Check if request is within rate limit using token bucket.
         
-        Token Bucket Algorithm:
-        1. Calculate elapsed time since last request
-        2. Add tokens based on: elapsed_time * rate
-        3. Cap tokens at burst size
-        4. If tokens ≥ 1, consume 1 token and allow request
-        5. Otherwise, deny request
+        Token bucket refills at constant rate and caps at burst size.
+        Each request consumes 1 token if available.
         
         Args:
-            client_ip: Client IP address
+            client_ip: Client IP address (rate limit key)
             
         Returns:
             True if request allowed, False if rate limited
@@ -184,26 +183,36 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         now = time.time()
         tokens, last_update = self.buckets[client_ip]
         
-        # Calculate elapsed time and refill tokens
+        # Refill tokens based on elapsed time
         elapsed = now - last_update
-        tokens = min(self.burst, tokens + elapsed * self.rate)
+        refilled_tokens = elapsed * self.rate
+        tokens = min(self.burst, tokens + refilled_tokens)
+        
+        logger.debug(
+            f"Token bucket for {client_ip}: {tokens:.2f} tokens "
+            f"(refilled {refilled_tokens:.2f} in {elapsed:.2f}s)"
+        )
         
         # Check if we have at least 1 token
         if tokens >= 1.0:
             # Consume 1 token and allow request
             self.buckets[client_ip] = (tokens - 1.0, now)
+            logger.debug(f"Token consumed: {client_ip} now has {tokens - 1.0:.2f} tokens")
             return True
         
         # Rate limited - no tokens available
         self.buckets[client_ip] = (tokens, now)
+        logger.debug(f"Rate limited: {client_ip} has {tokens:.2f} tokens (need 1.0)")
         return False
     
     def _rate_limit_response(self) -> JSONResponse:
         """Generate 429 Too Many Requests response.
         
         Returns:
-            JSON response with rate limit error
+            JSON response with rate limit error and retry info
         """
+        retry_after = int(1.0 / self.rate)  # Seconds to wait for 1 token
+        
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             content={
@@ -212,6 +221,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 "detail": f"Maximum {self.rate} requests per second allowed"
             },
             headers={
-                "Retry-After": str(int(1 / self.rate))  # Seconds to wait
+                "Retry-After": str(retry_after)
             }
         )
+
+
+logger.debug("Rate limit middleware module loaded")

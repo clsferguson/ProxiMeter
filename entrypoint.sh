@@ -99,6 +99,7 @@ echo ""
 echo "👤 Dropping privileges to appuser..."
 echo "🌐 Starting FastAPI on 0.0.0.0:${APP_PORT}..."
 echo ""
+echo "--------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
 
 # Drop to appuser and start app
 exec su -s /bin/bash -c "exec uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT}" appuser

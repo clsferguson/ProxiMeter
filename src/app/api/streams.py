@@ -2,13 +2,23 @@
 
 This module provides FastAPI routes for managing RTSP streams with GPU acceleration.
 
-Updated for GPU-only architecture:
-- Enforces GPU backend detection from entrypoint.sh
-- No CPU fallback (fail-fast)
-- Uses singleton StreamsService from main.py (CRITICAL FIX)
-- Adds snapshot endpoint for dashboard thumbnails
-- 5fps MJPEG streaming at full resolution
-- Constitution-compliant security and observability
+Architecture:
+- GPU-only operation (fail-fast if GPU unavailable)
+- Singleton StreamsService ensures shared FFmpeg process state
+- FFmpeg outputs MJPEG at 5fps (constitution-mandated cap)
+- Full resolution preservation, no video storage
+
+Logging Strategy:
+    DEBUG - Validation, state checks, retry attempts
+    INFO  - Stream lifecycle (create/start/stop/delete), captures
+    WARN  - Invalid configs, GPU unavailable, not found
+    ERROR - Exceptions with stack traces
+
+Constitution Compliance:
+    - 5fps cap enforced (no variable fps)
+    - GPU-only (no CPU fallback)
+    - Full resolution (no downscaling)
+    - No video storage (live frames only)
 """
 from __future__ import annotations
 
@@ -16,27 +26,17 @@ import asyncio
 import json
 import logging
 import random
-import io
 from datetime import datetime, timezone
 from typing import Final
 
-import cv2
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse, Response
-from PIL import Image
 
 from ..models.stream import NewStream, EditStream, ReorderRequest
 from ..services.streams_service import StreamsService
 from ..utils.rtsp import validate_rtsp_url, build_ffmpeg_command
 from ..utils.strings import mask_rtsp_credentials
 from ..config_io import get_gpu_backend
-
-# ============================================================================
-# CRITICAL FIX: Import singleton service getter from main.py
-# ============================================================================
-# This ensures ALL requests use the SAME StreamsService instance with the
-# SAME active_processes dict. Without this, each request creates a new
-# service with an empty dict, causing "Stream not in active_processes" errors.
 from ..services.container import get_streams_service
 
 logger = logging.getLogger(__name__)
@@ -48,29 +48,22 @@ router = APIRouter(tags=["streams"])
 # ============================================================================
 
 MAX_CONCURRENT_STREAMS: Final[int] = 4
-"""Maximum number of streams that can be actively processed simultaneously."""
+"""Maximum concurrent FFmpeg processes."""
 
 MJPEG_QUALITY: Final[int] = 85
-"""JPEG encoding quality (0-100). Higher = better quality but larger size."""
+"""JPEG encoding quality (0-100) for FFmpeg output."""
 
-SSE_FPS: Final[int] = 5
-"""Server-sent events frame rate for detection score streaming."""
+FPS: Final[int] = 5
+"""Locked frame rate (constitution-mandated)."""
 
 SNAPSHOT_TIMEOUT: Final[float] = 2.0
-"""Timeout in seconds for capturing snapshot frame."""
+"""Snapshot capture timeout in seconds."""
+
+SNAPSHOT_MAX_RETRIES: Final[int] = 3
+"""Maximum snapshot retry attempts."""
 
 # Global lock for concurrent stream starts
 _start_lock = asyncio.Lock()
-
-
-# ============================================================================
-# Dependencies
-# ============================================================================
-# 
-# NOTE: The get_streams_service dependency is now imported from main.py
-# It returns the singleton StreamsService instance created at startup.
-# DO NOT define a new get_streams_service() function here!
-
 
 # ============================================================================
 # Helper Functions
@@ -83,92 +76,75 @@ async def validate_stream_config(
 ) -> None:
     """Validate stream configuration before creation/update.
     
-    Constitution-compliant validation:
-    - GPU backend MUST be detected (no CPU fallback)
-    - FFmpeg params validated for shell injection
-    - RTSP URL format validated
+    Validates:
+    - GPU backend availability (constitution requirement)
+    - RTSP URL format
+    - FFmpeg parameters (shell injection protection)
     
-    Args:
-        rtsp_url: RTSP URL to validate
-        ffmpeg_params: Optional FFmpeg parameters to validate
-        hw_accel_enabled: Whether hardware acceleration is enabled
-        
     Raises:
-        ValueError: If validation fails with descriptive error message
-        RuntimeError: If GPU required but not detected
+        ValueError: Invalid configuration
+        RuntimeError: GPU not available
     """
+    logger.debug(f"Validating config: rtsp={mask_rtsp_credentials(rtsp_url)}, hw_accel={hw_accel_enabled}")
+    
     gpu_backend = get_gpu_backend()
     params = ffmpeg_params or []
     
-    # Constitution Principle III: GPU backend contract
     if gpu_backend == "none":
+        logger.warning("GPU backend not detected during validation")
         raise RuntimeError(
-            "GPU backend not detected. This application requires GPU acceleration. "
-            "Ensure NVIDIA/AMD/Intel GPU with drivers is available."
+            "GPU backend not detected. This application requires GPU acceleration."
         )
     
+    logger.debug(f"GPU backend: {gpu_backend}")
+    
     if not validate_rtsp_url(rtsp_url, params, gpu_backend):
+        logger.error(f"RTSP validation failed: {mask_rtsp_credentials(rtsp_url)}")
         raise ValueError("Invalid RTSP URL or FFmpeg parameters")
     
-    # Build command to verify compatibility
-    build_ffmpeg_command(
-        rtsp_url=rtsp_url,
-        ffmpeg_params=params,
-        gpu_backend=gpu_backend
-    )
+    # Verify FFmpeg command can be built
+    try:
+        cmd = build_ffmpeg_command(
+            rtsp_url=rtsp_url,
+            ffmpeg_params=params,
+            gpu_backend=gpu_backend
+        )
+        logger.debug(f"FFmpeg command validated: {len(cmd)} args")
+    except Exception as e:
+        logger.error(f"FFmpeg command build failed: {e}")
+        raise
 
 
 def mask_stream_response(stream: dict) -> dict:
-    """Mask RTSP credentials in stream response for security."""
+    """Mask RTSP credentials in response for security."""
     masked = stream.copy()
     if "rtsp_url" in masked:
         masked["rtsp_url"] = mask_rtsp_credentials(masked["rtsp_url"])
     return masked
 
 
-def encode_frame_to_jpeg(frame) -> bytes | None:
-    """Encode OpenCV frame to JPEG bytes at original resolution.
-    
-    Full-resolution encoding as per constitution requirements.
-    """
-    try:
-        ret, jpeg = cv2.imencode(
-            '.jpg', 
-            frame, 
-            [cv2.IMWRITE_JPEG_QUALITY, MJPEG_QUALITY]
-        )
-        if not ret:
-            return None
-        
-        return jpeg.tobytes()
-    except Exception as e:
-        logger.error(f"Error encoding frame: {e}")
-        return None
-
-
 # ============================================================================
-# Utility Endpoints (MUST BE BEFORE /{stream_id} ROUTES)
+# Utility Endpoints
 # ============================================================================
 
 @router.get("/gpu-backend")
 async def get_gpu_info() -> dict:
-    """Get detected GPU backend information.
-    
-    Returns GPU backend detected by entrypoint.sh via GPU_BACKEND_DETECTED env var.
-    Constitution Principle III: Explicit GPU backend contract.
-    
-    Returns:
-        Dict with gpu_backend key (nvidia, amd, intel, or none)
-    """
+    """Get detected GPU backend information."""
     backend = get_gpu_backend()
+    logger.info(f"GPU backend query: {backend}")
     
     if backend == "none":
-        logger.warning("GPU backend not detected - application requires GPU")
+        logger.warning("GPU backend unavailable")
+        return {
+            "gpu_backend": backend,
+            "gpu_required": True,
+            "message": "No GPU detected - streams will fail to start"
+        }
     
     return {
         "gpu_backend": backend,
         "gpu_required": True,
-        "message": f"GPU backend: {backend}" if backend != "none" else "No GPU detected - application will fail to start streams"
+        "message": f"GPU backend: {backend}"
     }
 
 
@@ -177,17 +153,17 @@ async def reorder_streams(
     reorder_data: ReorderRequest,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Reorder streams in the dashboard."""
+    """Reorder streams for dashboard display."""
     try:
+        logger.info(f"Reordering {len(reorder_data.order)} stream(s)")
         success = await service.reorder_streams(reorder_data.order)
+        logger.info("Streams reordered successfully")
         return {"success": success, "message": "Streams reordered successfully"}
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        logger.warning(f"Invalid reorder request: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error reordering streams: {e}", exc_info=True)
+        logger.error(f"Reorder failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to reorder streams"
@@ -204,10 +180,12 @@ async def list_streams(
 ) -> list[dict]:
     """List all configured streams with masked credentials."""
     try:
+        logger.debug("Listing streams")
         streams = await service.list_streams()
+        logger.debug(f"Listed {len(streams)} stream(s)")
         return [mask_stream_response(stream) for stream in streams]
     except Exception as e:
-        logger.error(f"Error listing streams: {e}", exc_info=True)
+        logger.error(f"List failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list streams"
@@ -219,11 +197,10 @@ async def create_stream(
     new_stream: NewStream,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Create a new stream with validation and auto-start support.
-    
-    Constitution Principle III: GPU backend validation on creation.
-    """
+    """Create a new stream with GPU validation."""
     try:
+        logger.info(f"Creating stream: {new_stream.name}")
+        
         # Validate configuration (includes GPU check)
         await validate_stream_config(
             rtsp_url=new_stream.rtsp_url,
@@ -231,7 +208,6 @@ async def create_stream(
             hw_accel_enabled=new_stream.hw_accel_enabled
         )
         
-        # Create stream with auto_start support
         stream = await service.create_stream(
             name=new_stream.name,
             rtsp_url=new_stream.rtsp_url,
@@ -240,20 +216,16 @@ async def create_stream(
             auto_start=new_stream.auto_start
         )
         
+        logger.info(f"Stream created: {stream['name']} ({stream['id']})")
         return mask_stream_response(stream)
     except RuntimeError as e:
-        # GPU detection failures
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(e)
-        )
+        logger.warning(f"Create failed - GPU unavailable: {e}")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        logger.warning(f"Create failed - validation error: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error creating stream: {e}", exc_info=True)
+        logger.error(f"Create failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create stream"
@@ -267,22 +239,21 @@ async def get_stream(
 ) -> dict:
     """Get a single stream by ID."""
     try:
+        logger.debug(f"Getting stream: {stream_id}")
         stream = await service.get_stream(stream_id)
         if not stream:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Stream {stream_id} not found"
-            )
+            logger.warning(f"Stream not found: {stream_id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stream not found")
         return mask_stream_response(stream)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting stream {stream_id}: {e}", exc_info=True)
+        logger.error(f"Get failed for {stream_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get stream"
         )
-    
+
 
 @router.patch("/{stream_id}")
 @router.put("/{stream_id}")
@@ -291,60 +262,55 @@ async def update_stream(
     edit_stream: EditStream,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Update an existing stream (partial update).
-    
-    Auto-restarts stream if FFmpeg params or RTSP URL changes while running.
-    """
+    """Update stream (partial). Auto-restarts if parameters change while running."""
     try:
-        # Get current stream
-        current_stream = await service.get_stream(stream_id)
-        if not current_stream:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Stream {stream_id} not found"
-            )
+        logger.info(f"Updating stream: {stream_id}")
         
-        # Track if restart needed
+        current = await service.get_stream(stream_id)
+        if not current:
+            logger.warning(f"Update failed - not found: {stream_id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stream not found")
+        
+        # Check if restart needed
         needs_restart = False
-        was_running = current_stream["status"] == "running"
+        was_running = current["status"] == "running"
         
-        # Check if critical params changed
         if was_running:
-            if edit_stream.rtsp_url and edit_stream.rtsp_url != current_stream["rtsp_url"]:
+            # URL changed
+            if edit_stream.rtsp_url and edit_stream.rtsp_url != current["rtsp_url"]:
                 needs_restart = True
-                logger.info(f"RTSP URL changed for {stream_id}, will restart")
+                logger.info(f"RTSP URL changed for {stream_id}, restart required")
             
+            # FFmpeg params changed
             if edit_stream.ffmpeg_params is not None:
-                current_params = set(current_stream.get("ffmpeg_params", []))
-                new_params = set(edit_stream.ffmpeg_params)
-                if current_params != new_params:
+                if set(current.get("ffmpeg_params", [])) != set(edit_stream.ffmpeg_params):
                     needs_restart = True
-                    logger.info(f"FFmpeg params changed for {stream_id}, will restart")
+                    logger.info(f"FFmpeg params changed for {stream_id}, restart required")
             
+            # HW accel changed
             if edit_stream.hw_accel_enabled is not None:
-                if edit_stream.hw_accel_enabled != current_stream.get("hw_accel_enabled"):
+                if edit_stream.hw_accel_enabled != current.get("hw_accel_enabled"):
                     needs_restart = True
-                    logger.info(f"Hardware acceleration changed for {stream_id}, will restart")
+                    logger.info(f"HW accel changed for {stream_id}, restart required")
         
-        # Stop stream if restart needed
+        # Stop if restart needed
         if needs_restart:
-            logger.info(f"Stopping stream {stream_id} for parameter update")
+            logger.info(f"Stopping {stream_id} for parameter update")
             await service.stop_stream(stream_id)
         
-        # Re-validate if URL or params changed
+        # Re-validate if critical params changed
         if edit_stream.rtsp_url is not None or edit_stream.ffmpeg_params is not None:
-            url = edit_stream.rtsp_url or current_stream["rtsp_url"]
-            params = edit_stream.ffmpeg_params or current_stream.get("ffmpeg_params", [])
+            url = edit_stream.rtsp_url or current["rtsp_url"]
+            params = edit_stream.ffmpeg_params or current.get("ffmpeg_params", [])
             hw_accel = (
                 edit_stream.hw_accel_enabled 
                 if edit_stream.hw_accel_enabled is not None 
-                else current_stream.get("hw_accel_enabled", False)
+                else current.get("hw_accel_enabled", False)
             )
-            
             await validate_stream_config(url, params, hw_accel)
         
-        # Update stream
-        updated_stream = await service.update_stream(
+        # Update
+        updated = await service.update_stream(
             stream_id=stream_id,
             name=edit_stream.name,
             rtsp_url=edit_stream.rtsp_url,
@@ -354,35 +320,29 @@ async def update_stream(
             auto_start=edit_stream.auto_start
         )
         
-        if not updated_stream:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Stream {stream_id} not found"
-            )
+        if not updated:
+            logger.warning(f"Update failed - not found: {stream_id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stream not found")
         
-        # Restart stream if it was running and params changed
+        # Restart if needed
         if needs_restart:
-            logger.info(f"Restarting stream {stream_id} with new parameters")
-            success = await service.start_stream(stream_id, updated_stream)
+            logger.info(f"Restarting {stream_id} with new parameters")
+            success = await service.start_stream(stream_id, updated)
             if not success:
-                logger.error(f"Failed to restart stream {stream_id}")
-                # Don't fail the update, just log the error
+                logger.error(f"Restart failed for {stream_id}")
         
-        return mask_stream_response(updated_stream)
+        logger.info(f"Stream updated: {stream_id}")
+        return mask_stream_response(updated)
     except RuntimeError as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(e)
-        )
+        logger.warning(f"Update failed - GPU unavailable: {e}")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        logger.warning(f"Update failed - validation error: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error updating stream {stream_id}: {e}", exc_info=True)
+        logger.error(f"Update failed for {stream_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update stream"
@@ -396,16 +356,16 @@ async def delete_stream(
 ) -> None:
     """Delete a stream and stop it if running."""
     try:
+        logger.info(f"Deleting stream: {stream_id}")
         deleted = await service.delete_stream(stream_id)
         if not deleted:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Stream {stream_id} not found"
-            )
+            logger.warning(f"Delete failed - not found: {stream_id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stream not found")
+        logger.info(f"Stream deleted: {stream_id}")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting stream {stream_id}: {e}", exc_info=True)
+        logger.error(f"Delete failed for {stream_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete stream"
@@ -421,31 +381,33 @@ async def start_stream(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> dict:
-    """Start FFmpeg stream processing with GPU acceleration.
-    
-    Constitution Principle III: Fail-fast if GPU not available.
-    """
+    """Start FFmpeg stream processing with GPU acceleration."""
     try:
-        # Check GPU backend
+        logger.info(f"Starting stream: {stream_id}")
+        
         gpu_backend = get_gpu_backend()
         if gpu_backend == "none":
+            logger.warning(f"Start failed - GPU unavailable for {stream_id}")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="GPU backend not detected. Cannot start stream."
+                detail="GPU backend not detected"
             )
         
         stream = await service.get_stream(stream_id)
         if not stream:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Stream not found"
-            )
+            logger.warning(f"Start failed - not found: {stream_id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stream not found")
         
         if stream["status"] == "running":
+            logger.debug(f"Stream already running: {stream_id}")
             return {"message": "Stream already running", "status": "running"}
         
         async with _start_lock:
-            if len(service.active_processes) >= MAX_CONCURRENT_STREAMS:
+            active = len(service.active_processes)
+            logger.debug(f"Active streams: {active}/{MAX_CONCURRENT_STREAMS}")
+            
+            if active >= MAX_CONCURRENT_STREAMS:
+                logger.warning(f"Max streams reached: {active}/{MAX_CONCURRENT_STREAMS}")
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"Maximum concurrent streams ({MAX_CONCURRENT_STREAMS}) reached"
@@ -453,16 +415,18 @@ async def start_stream(
             
             success = await service.start_stream(stream_id, stream)
             if not success:
+                logger.error(f"Start failed for {stream_id}")
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Failed to start stream processing"
                 )
         
+        logger.info(f"Stream started: {stream_id}")
         return {"message": "Stream started successfully", "status": "running", "gpu_backend": gpu_backend}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error starting stream {stream_id}: {e}", exc_info=True)
+        logger.error(f"Start failed for {stream_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to start stream"
@@ -476,28 +440,31 @@ async def stop_stream(
 ) -> dict:
     """Stop FFmpeg stream processing."""
     try:
+        logger.info(f"Stopping stream: {stream_id}")
+        
         stream = await service.get_stream(stream_id)
         if not stream:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Stream not found"
-            )
+            logger.warning(f"Stop failed - not found: {stream_id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stream not found")
         
         if stream["status"] != "running":
+            logger.debug(f"Stream already stopped: {stream_id}")
             return {"message": "Stream not running", "status": "stopped"}
         
         success = await service.stop_stream(stream_id)
         if not success:
+            logger.error(f"Stop failed for {stream_id}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to stop stream"
             )
         
+        logger.info(f"Stream stopped: {stream_id}")
         return {"message": "Stream stopped successfully", "status": "stopped"}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error stopping stream {stream_id}: {e}", exc_info=True)
+        logger.error(f"Stop failed for {stream_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to stop stream"
@@ -513,48 +480,44 @@ async def stream_mjpeg(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> StreamingResponse:
-    """Stream MJPEG video at full resolution (5fps) for web viewing.
-    
-    Constitution Principle II: 5 FPS cap, full resolution, no video storage.
-    """
+    """Stream MJPEG video at 5fps (constitution-mandated cap)."""
     stream = await service.get_stream(stream_id)
     if not stream:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Stream not found"
-        )
+        logger.warning(f"MJPEG failed - not found: {stream_id}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stream not found")
     
     if stream["status"] != "running":
+        logger.warning(f"MJPEG failed - not running: {stream_id}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Stream must be started before viewing."
+            detail="Stream must be started first"
         )
     
-    fps = stream.get("target_fps", 5)
+    logger.info(f"Starting MJPEG stream: {stream_id}")
     
     async def generate_frames():
-        """Generate MJPEG frame stream with proper timing."""
+        """Generate MJPEG multipart stream at locked 5fps."""
+        frame_count = 0  # Initialize before try block
         try:
-            frame_interval = 1.0 / fps
-            last_frame_time = 0
+            frame_interval = 1.0 / FPS
+            last_time = 0.0
             
             while True:
                 current_time = asyncio.get_event_loop().time()
                 
-                # Throttle frame rate
-                if last_frame_time > 0:
-                    elapsed = current_time - last_frame_time
+                # Throttle to 5fps
+                if last_time > 0:
+                    elapsed = current_time - last_time
                     if elapsed < frame_interval:
                         await asyncio.sleep(frame_interval - elapsed)
                 
                 frame_data = await service.get_frame(stream_id)
                 if frame_data is None:
-                    logger.warning(f"Stream {stream_id} ended")
+                    logger.warning(f"MJPEG ended - no more frames: {stream_id}")
                     break
                 
                 success, jpeg_bytes = frame_data
                 if not success or not jpeg_bytes:
-                    # No frame ready yet, wait a bit
                     await asyncio.sleep(0.1)
                     continue
                 
@@ -566,13 +529,19 @@ async def stream_mjpeg(
                     jpeg_bytes + b'\r\n'
                 )
                 
-                last_frame_time = asyncio.get_event_loop().time()
+                frame_count += 1
+                last_time = asyncio.get_event_loop().time()
+                
+                # Log every 10 seconds
+                if frame_count % 50 == 0:
+                    logger.debug(f"MJPEG {stream_id}: {frame_count} frames")
                 
         except asyncio.CancelledError:
-            logger.info(f"MJPEG stream cancelled for {stream_id}")
+            logger.info(f"MJPEG cancelled: {stream_id} ({frame_count} frames)")
             raise
         except Exception as e:
-            logger.error(f"Error in MJPEG stream {stream_id}: {e}", exc_info=True)
+            logger.error(f"MJPEG error for {stream_id}: {e}", exc_info=True)
+
     
     return StreamingResponse(
         generate_frames(),
@@ -591,48 +560,27 @@ async def get_snapshot(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> Response:
-    """Get a single JPEG snapshot from the stream for dashboard thumbnails.
-    
-    Constitution Principle II: No video storage beyond live frames.
-    Returns current frame at full resolution.
-    
-    Args:
-        stream_id: UUID of stream to snapshot
-        service: Injected StreamsService instance
-        
-    Returns:
-        JPEG image response
-        
-    Raises:
-        HTTPException: 404 if not found, 400 if not running, 503 if frame unavailable
-    """
-    logger.info(f"📸 Snapshot request received for stream {stream_id}")
+    """Get single JPEG snapshot for dashboard thumbnails."""
+    logger.info(f"Snapshot request: {stream_id}")
     
     stream = await service.get_stream(stream_id)
     if not stream:
-        logger.warning(f"❌ Snapshot failed: Stream {stream_id} not found")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Stream not found"
-        )
-    
-    logger.debug(f"Stream {stream_id} status: {stream['status']}")
-    logger.debug(f"Active processes: {list(service.active_processes.keys())}")
+        logger.warning(f"Snapshot failed - not found: {stream_id}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stream not found")
     
     if stream["status"] != "running":
-        logger.warning(f"❌ Snapshot failed: Stream {stream_id} not running (status: {stream['status']})")
+        logger.warning(f"Snapshot failed - not running: {stream_id}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Stream not running. Start stream first."
+            detail="Stream must be started first"
         )
     
     try:
-        # Get single frame with timeout - retry up to 3 times
-        max_retries = 3
+        # Retry up to 3 times with timeout
         jpeg_bytes = None
         
-        for attempt in range(max_retries):
-            logger.debug(f"Snapshot attempt {attempt + 1}/{max_retries} for stream {stream_id}")
+        for attempt in range(SNAPSHOT_MAX_RETRIES):
+            logger.debug(f"Snapshot attempt {attempt + 1}/{SNAPSHOT_MAX_RETRIES}: {stream_id}")
             
             frame_data = await asyncio.wait_for(
                 service.get_frame(stream_id),
@@ -640,25 +588,22 @@ async def get_snapshot(
             )
             
             if frame_data is None:
-                logger.warning(f"Attempt {attempt + 1}: get_frame returned None")
+                logger.debug(f"Attempt {attempt + 1}: get_frame returned None")
                 continue
             
             success, frame_bytes = frame_data
             if success and frame_bytes:
                 jpeg_bytes = frame_bytes
-                logger.info(f"✅ Snapshot captured for {stream_id}: {len(jpeg_bytes)} bytes (attempt {attempt + 1})")
+                logger.info(f"Snapshot captured: {stream_id} ({len(jpeg_bytes)} bytes)")
                 break
-            else:
-                logger.debug(f"Attempt {attempt + 1}: success={success}, bytes_len={len(frame_bytes) if frame_bytes else 0}")
             
-            # Wait a bit before retry
             await asyncio.sleep(0.2)
         
         if not jpeg_bytes:
-            logger.error(f"❌ Snapshot failed for {stream_id}: No frame captured after {max_retries} retries")
+            logger.error(f"Snapshot failed - no frame after {SNAPSHOT_MAX_RETRIES} retries: {stream_id}")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Failed to capture frame after retries"
+                detail="Failed to capture frame"
             )
         
         return Response(
@@ -671,7 +616,7 @@ async def get_snapshot(
         )
         
     except asyncio.TimeoutError:
-        logger.error(f"❌ Snapshot timeout for {stream_id}: Stream may be stalled")
+        logger.error(f"Snapshot timeout: {stream_id}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Snapshot timeout - stream may be stalled"
@@ -679,7 +624,7 @@ async def get_snapshot(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Snapshot error for {stream_id}: {e}", exc_info=True)
+        logger.error(f"Snapshot error for {stream_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to capture snapshot"
@@ -691,32 +636,29 @@ async def stream_scores_sse(
     stream_id: str,
     service: StreamsService = Depends(get_streams_service)
 ) -> StreamingResponse:
-    """SSE endpoint for real-time detection scores.
-    
-    Constitution Principle VII: Real-time scoring for home automation.
-    Currently returns placeholder data until YOLO + Shapely integration.
-    
-    TODO: Replace with actual YOLO person detection + polygon zone scoring.
-    """
+    """SSE endpoint for real-time detection scores (placeholder for YOLO)."""
     stream = await service.get_stream(stream_id)
     if not stream:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Stream not found"
-        )
+        logger.warning(f"SSE failed - not found: {stream_id}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stream not found")
     
     if stream["status"] != "running":
+        logger.warning(f"SSE failed - not running: {stream_id}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Stream not running"
+            detail="Stream must be started first"
         )
     
+    logger.info(f"Starting SSE stream: {stream_id}")
+    
     async def event_generator():
-        """Generate SSE events with detection scores."""
+        """Generate SSE events with detection scores (placeholder data)."""
+        event_count = 0  # Initialize before try block
         try:
             while True:
                 frame_data = await service.get_frame(stream_id)
                 if frame_data is None:
+                    logger.info(f"SSE ended: {stream_id}")
                     break
                 
                 ret, frame = frame_data
@@ -724,25 +666,30 @@ async def stream_scores_sse(
                     break
                 
                 # TODO: Replace with actual YOLO + Shapely detection
-                # Constitution Principle VII: distance, coordinates, size scoring
                 score = {
                     "stream_id": stream_id,
-                    "zone_id": None,  # TODO: Add zone detection
-                    "object_class": "person",  # TODO: From YOLO
+                    "zone_id": None,
+                    "object_class": "person",
                     "confidence": random.uniform(0.7, 0.99),
-                    "distance": random.uniform(0, 1),  # TODO: Calculate from target point
+                    "distance": random.uniform(0, 1),
                     "coordinates": {"x": random.uniform(0, 1), "y": random.uniform(0, 1)},
-                    "size": random.randint(50, 200),  # TODO: bbox width * height
+                    "size": random.randint(50, 200),
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 
                 yield f"data: {json.dumps(score)}\n\n"
-                await asyncio.sleep(1 / SSE_FPS)
+                
+                event_count += 1
+                if event_count % 50 == 0:
+                    logger.debug(f"SSE {stream_id}: {event_count} events")
+                
+                await asyncio.sleep(1.0 / FPS)
         except asyncio.CancelledError:
-            logger.info(f"SSE stream cancelled for {stream_id}")
+            logger.info(f"SSE cancelled: {stream_id} ({event_count} events)")
             raise
         except Exception as e:
-            logger.error(f"Error in SSE stream {stream_id}: {e}", exc_info=True)
+            logger.error(f"SSE error for {stream_id}: {e}", exc_info=True)
+
     
     return StreamingResponse(
         event_generator(),
@@ -753,3 +700,6 @@ async def stream_scores_sse(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+logger.debug("Stream management router initialized")

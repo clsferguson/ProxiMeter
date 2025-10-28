@@ -1,15 +1,19 @@
 """Stream data models for ProxiMeter.
 
-Defines Pydantic models for RTSP stream configuration and management:
-- Stream: Complete stream model with all fields
-- NewStream: Model for creating new streams (without generated fields)
-- EditStream: Model for partial stream updates (all fields optional)
-- ReorderRequest: Model for reordering streams in the UI
+Defines Pydantic v2 models for RTSP stream configuration:
+- Stream: Complete stream with all fields (used in responses)
+- NewStream: Stream creation (excludes auto-generated fields)
+- EditStream: Partial updates (all fields optional, PATCH semantics)
+- ReorderRequest: Reorder streams in UI
 
-All models use Pydantic v2 with type annotations and field validation.
+Field Validation:
+- RTSP URL must start with rtsp:// or rtsps://
+- Name length: 1-50 characters
+- No duplicate stream IDs in reorder requests
 
-Updated: Added auto_start field to enable automatic stream startup on
-creation and application restart.
+Constitution Compliance:
+- auto_start: Resume streams on application restart
+- hw_accel_enabled: GPU-only operation enforcement
 """
 from __future__ import annotations
 
@@ -19,6 +23,22 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+# ============================================================================
+# Validation Helpers
+# ============================================================================
+
+def validate_rtsp_url(url: str) -> None:
+    """Validate RTSP URL protocol prefix.
+    
+    Args:
+        url: RTSP URL to validate
+        
+    Raises:
+        ValueError: If URL doesn't start with rtsp:// or rtsps://
+    """
+    if not url.startswith(("rtsp://", "rtsps://")):
+        raise ValueError("RTSP URL must start with rtsp:// or rtsps://")
+
 
 # ============================================================================
 # Complete Stream Model
@@ -27,97 +47,62 @@ from pydantic import BaseModel, Field, model_validator
 class Stream(BaseModel):
     """Complete stream model with all fields.
     
-    Represents a fully-configured RTSP stream with processing parameters.
+    Represents a fully-configured RTSP stream for GPU-accelerated processing.
     """
     
-    id: Annotated[
-        str,
-        Field(
-            default_factory=lambda: str(uuid.uuid4()),
-            description="Unique stream identifier (UUID)"
-        )
-    ]
+    id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        description="Unique stream identifier (UUID)"
+    )
     
-    name: Annotated[
-        str,
-        Field(
-            min_length=1,
-            max_length=50,
-            description="Human-readable stream name",
-            examples=["Front Door Camera", "Parking Lot"]
-        )
-    ]
+    name: str = Field(
+        min_length=1,
+        max_length=50,
+        description="Human-readable stream name",
+        examples=["Front Door Camera", "Parking Lot"]
+    )
     
-    rtsp_url: Annotated[
-        str,
-        Field(
-            min_length=10,
-            description="RTSP stream URL (rtsp:// or rtsps://)",
-            examples=["rtsp://admin:pass@192.168.1.100:554/stream"]
-        )
-    ]
+    rtsp_url: str = Field(
+        min_length=10,
+        description="RTSP stream URL",
+        examples=["rtsp://admin:pass@192.168.1.100:554/stream"]
+    )
     
-    hw_accel_enabled: Annotated[
-        bool,
-        Field(
-            default=True,
-            description="Enable hardware acceleration if GPU available"
-        )
-    ]
+    hw_accel_enabled: bool = Field(
+        default=True,
+        description="Enable GPU hardware acceleration"
+    )
     
-    ffmpeg_params: Annotated[
-        list[str],
-        Field(
-            default_factory=list,
-            description="Custom FFmpeg parameters (empty uses service defaults)"
-        )
-    ]
+    ffmpeg_params: list[str] = Field(
+        default_factory=list,
+        description="Custom FFmpeg parameters (empty uses defaults)"
+    )
     
-    auto_start: Annotated[
-        bool,
-        Field(
-            default=True,
-            description="Automatically start stream when configured or on application restart"
-        )
-    ]
+    auto_start: bool = Field(
+        default=True,
+        description="Auto-start stream on creation or app restart"
+    )
     
-    created_at: Annotated[
-        str,
-        Field(
-            default_factory=lambda: datetime.now(timezone.utc).isoformat(),
-            description="ISO 8601 timestamp of stream creation"
-        )
-    ]
+    created_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        description="ISO 8601 creation timestamp"
+    )
     
-    order: Annotated[
-        int,
-        Field(
-            default=0,
-            ge=0,
-            description="Display order in UI (0-based)"
-        )
-    ]
+    order: int = Field(
+        default=0,
+        ge=0,
+        description="Display order in UI (0-based)"
+    )
     
-    status: Annotated[
-        Literal["running", "stopped"],
-        Field(
-            default="stopped",
-            description="Current stream processing status"
-        )
-    ]
+    status: Literal["running", "stopped"] = Field(
+        default="stopped",
+        description="Current processing status"
+    )
     
     @model_validator(mode="after")
     def validate_rtsp_url_format(self) -> Stream:
-        """Validate RTSP URL has correct protocol prefix.
-        
-        Returns:
-            Self for method chaining
-            
-        Raises:
-            ValueError: If URL doesn't start with rtsp:// or rtsps://
-        """
-        if not self.rtsp_url.startswith(("rtsp://", "rtsps://")):
-            raise ValueError("RTSP URL must start with rtsp:// or rtsps://")
+        """Validate RTSP URL protocol."""
+        validate_rtsp_url(self.rtsp_url)
         return self
 
 
@@ -129,64 +114,40 @@ class NewStream(BaseModel):
     """Model for creating new streams.
     
     Excludes auto-generated fields (id, created_at, order, status).
-    All fields required except hw_accel_enabled, ffmpeg_params, target_fps, and auto_start.
     """
     
-    name: Annotated[
-        str,
-        Field(
-            min_length=1,
-            max_length=50,
-            description="Human-readable stream name",
-            examples=["Front Door Camera", "Parking Lot"]
-        )
-    ]
+    name: str = Field(
+        min_length=1,
+        max_length=50,
+        description="Human-readable stream name",
+        examples=["Front Door Camera", "Parking Lot"]
+    )
     
-    rtsp_url: Annotated[
-        str,
-        Field(
-            min_length=10,
-            description="RTSP stream URL (rtsp:// or rtsps://)",
-            examples=["rtsp://admin:pass@192.168.1.100:554/stream"]
-        )
-    ]
+    rtsp_url: str = Field(
+        min_length=10,
+        description="RTSP stream URL",
+        examples=["rtsp://admin:pass@192.168.1.100:554/stream"]
+    )
     
-    hw_accel_enabled: Annotated[
-        bool,
-        Field(
-            default=True,
-            description="Enable hardware acceleration if GPU available"
-        )
-    ]
+    hw_accel_enabled: bool = Field(
+        default=True,
+        description="Enable GPU hardware acceleration"
+    )
     
-    ffmpeg_params: Annotated[
-        list[str],
-        Field(
-            default_factory=list,
-            description="Custom FFmpeg parameters (empty uses service defaults)"
-        )
-    ]
+    ffmpeg_params: list[str] = Field(
+        default_factory=list,
+        description="Custom FFmpeg parameters (empty uses defaults)"
+    )
     
-    auto_start: Annotated[
-        bool,
-        Field(
-            default=True,
-            description="Automatically start stream when configured or on application restart"
-        )
-    ]
+    auto_start: bool = Field(
+        default=True,
+        description="Auto-start stream on creation or app restart"
+    )
     
     @model_validator(mode="after")
     def validate_rtsp_url_format(self) -> NewStream:
-        """Validate RTSP URL has correct protocol prefix.
-        
-        Returns:
-            Self for method chaining
-            
-        Raises:
-            ValueError: If URL doesn't start with rtsp:// or rtsps://
-        """
-        if not self.rtsp_url.startswith(("rtsp://", "rtsps://")):
-            raise ValueError("RTSP URL must start with rtsp:// or rtsps://")
+        """Validate RTSP URL protocol."""
+        validate_rtsp_url(self.rtsp_url)
         return self
 
 
@@ -195,77 +156,49 @@ class NewStream(BaseModel):
 # ============================================================================
 
 class EditStream(BaseModel):
-    """Model for partial stream updates.
+    """Model for partial stream updates (PATCH semantics).
     
-    All fields optional to support PATCH semantics.
-    Only provided fields will be updated.
+    All fields optional - only provided fields are updated.
     """
     
-    name: Annotated[
-        str | None,
-        Field(
-            default=None,
-            min_length=1,
-            max_length=50,
-            description="Human-readable stream name",
-            examples=["Front Door Camera", "Parking Lot"]
-        )
-    ]
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=50,
+        description="Human-readable stream name"
+    )
     
-    rtsp_url: Annotated[
-        str | None,
-        Field(
-            default=None,
-            min_length=10,
-            description="RTSP stream URL (rtsp:// or rtsps://)",
-            examples=["rtsp://admin:pass@192.168.1.100:554/stream"]
-        )
-    ]
+    rtsp_url: str | None = Field(
+        default=None,
+        min_length=10,
+        description="RTSP stream URL"
+    )
     
-    status: Annotated[
-        Literal["running", "stopped"] | None,
-        Field(
-            default=None,
-            description="Current stream processing status"
-        )
-    ]
+    status: Literal["running", "stopped"] | None = Field(
+        default=None,
+        description="Processing status"
+    )
     
-    hw_accel_enabled: Annotated[
-        bool | None,
-        Field(
-            default=None,
-            description="Enable hardware acceleration if GPU available"
-        )
-    ]
+    hw_accel_enabled: bool | None = Field(
+        default=None,
+        description="Enable GPU hardware acceleration"
+    )
     
-    ffmpeg_params: Annotated[
-        list[str] | None,
-        Field(
-            default=None,
-            description="Custom FFmpeg parameters (empty uses service defaults)"
-        )
-    ]
+    ffmpeg_params: list[str] | None = Field(
+        default=None,
+        description="Custom FFmpeg parameters"
+    )
     
-    auto_start: Annotated[
-        bool | None,
-        Field(
-            default=None,
-            description="Update auto-start setting"
-        )
-    ]
+    auto_start: bool | None = Field(
+        default=None,
+        description="Auto-start setting"
+    )
     
     @model_validator(mode="after")
     def validate_rtsp_url_format(self) -> EditStream:
-        """Validate RTSP URL has correct protocol prefix (if provided).
-        
-        Returns:
-            Self for method chaining
-            
-        Raises:
-            ValueError: If URL provided and doesn't start with rtsp:// or rtsps://
-        """
-        if self.rtsp_url is not None and not self.rtsp_url.startswith(("rtsp://", "rtsps://")):
-            raise ValueError("RTSP URL must start with rtsp:// or rtsps://")
+        """Validate RTSP URL protocol if provided."""
+        if self.rtsp_url is not None:
+            validate_rtsp_url(self.rtsp_url)
         return self
 
 
@@ -276,31 +209,21 @@ class EditStream(BaseModel):
 class ReorderRequest(BaseModel):
     """Model for reordering streams in the UI.
     
-    Contains an ordered list of stream IDs representing the new display order.
+    Ordered list of stream IDs (UUIDs) representing new display order.
     """
     
-    order: Annotated[
-        list[str],
-        Field(
-            min_length=1,
-            description="Ordered list of stream IDs (UUIDs)",
-            examples=[
-                ["uuid-1", "uuid-2", "uuid-3"],
-                ["550e8400-e29b-41d4-a716-446655440000"]
-            ]
-        )
-    ]
+    order: list[str] = Field(
+        min_length=1,
+        description="Ordered list of stream IDs",
+        examples=[
+            ["uuid-1", "uuid-2", "uuid-3"],
+            ["550e8400-e29b-41d4-a716-446655440000"]
+        ]
+    )
     
     @model_validator(mode="after")
     def validate_no_duplicates(self) -> ReorderRequest:
-        """Validate no duplicate stream IDs in order list.
-        
-        Returns:
-            Self for method chaining
-            
-        Raises:
-            ValueError: If order contains duplicate IDs
-        """
+        """Validate no duplicate stream IDs."""
         if len(self.order) != len(set(self.order)):
             raise ValueError("Order list contains duplicate stream IDs")
         return self

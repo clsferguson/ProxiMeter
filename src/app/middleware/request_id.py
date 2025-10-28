@@ -1,4 +1,24 @@
-"""Request ID middleware for distributed tracing and debugging."""
+"""Request ID middleware for distributed tracing and request correlation.
+
+Assigns a unique identifier (UUID4) to each request for tracking across logs,
+services, and debugging. Supports client-provided request IDs for distributed
+tracing scenarios (e.g., microservices, API gateways).
+
+Logging Strategy:
+    DEBUG - Request ID generation, client-provided IDs
+    INFO  - Request start (→) with method and path
+    INFO  - Successful responses (← 2xx/3xx) with duration
+    WARN  - Client errors (4xx) with duration
+    ERROR - Server errors (5xx) with duration
+    ERROR - Unhandled exceptions with stack trace
+
+Features:
+    - UUID4 request IDs for guaranteed uniqueness
+    - Client-provided ID support (distributed tracing)
+    - Request/response logging with timing
+    - Stores ID in request.state for handler access
+    - Adds X-Request-ID header to responses
+"""
 from __future__ import annotations
 
 import logging
@@ -12,53 +32,50 @@ from starlette.types import ASGIApp
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================================
 # Request ID Middleware
 # ============================================================================
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
-    """Middleware to add unique request ID to each request.
+    """Middleware to add unique request ID to each request for tracing.
     
-    Features:
-    - Adds X-Request-ID header to requests and responses
-    - Supports client-provided request IDs for distributed tracing
-    - Stores request ID in request.state for access in handlers
-    - Logs request/response with timing information
+    Automatically generates UUID4 request IDs or accepts client-provided IDs
+    via X-Request-ID header. Logs all requests/responses with timing.
     
-    Usage:
-        app.add_middleware(RequestIDMiddleware)
+    Args:
+        app: ASGI application
+        header_name: HTTP header name for request ID (default: X-Request-ID)
         
-        # Access in route handler:
-        @app.get("/")
-        async def handler(request: Request):
-            request_id = request.state.request_id
-            logger.info(f"Processing request {request_id}")
+    Usage:
+        >>> app.add_middleware(RequestIDMiddleware)
+        >>> 
+        >>> @app.get("/")
+        >>> async def handler(request: Request):
+        ...     request_id = request.state.request_id
+        ...     logger.info(f"Processing {request_id}")
     """
     
     def __init__(
         self,
         app: ASGIApp,
-        header_name: str = "X-Request-ID",
-        log_requests: bool = True
+        header_name: str = "X-Request-ID"
     ) -> None:
         """Initialize request ID middleware.
         
         Args:
             app: ASGI application
-            header_name: HTTP header name for request ID (default: X-Request-ID)
-            log_requests: Whether to log request/response (default: True)
+            header_name: HTTP header name for request ID
         """
         super().__init__(app)
         self.header_name = header_name
-        self.log_requests = log_requests
+        logger.info(f"Request ID middleware initialized with header: {header_name}")
     
     async def dispatch(
         self,
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        """Process request and inject request ID.
+        """Process request with unique request ID.
         
         Args:
             request: Incoming HTTP request
@@ -69,18 +86,20 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         """
         # Get or generate request ID
         request_id = request.headers.get(self.header_name)
-        if not request_id:
+        if request_id:
+            logger.debug(f"Using client-provided request ID: {request_id}")
+        else:
             request_id = self._generate_request_id()
+            logger.debug(f"Generated request ID: {request_id}")
         
-        # Store in request state for access in handlers
+        # Store in request state for handler access
         request.state.request_id = request_id
         
-        # Start timing (always, so duration is available)
+        # Start timing
         start_time = time.time()
-
+        
         # Log incoming request
-        if self.log_requests:
-            self._log_request(request, request_id)
+        self._log_request(request, request_id)
         
         try:
             # Process request
@@ -89,49 +108,44 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             # Add request ID to response headers
             response.headers[self.header_name] = request_id
             
-            # Log response
-            if self.log_requests:
-                duration = time.time() - start_time
-                self._log_response(request, response, request_id, duration)
+            # Log response with timing
+            duration = time.time() - start_time
+            self._log_response(request, response, request_id, duration)
             
             return response
             
         except Exception as e:
-            # Log exception with request ID
+            # Log exception with request ID and stack trace
+            duration = time.time() - start_time
             logger.error(
-                f"Request {request_id} failed: {type(e).__name__}: {e}",
+                f"Request {request_id} failed after {duration*1000:.2f}ms: "
+                f"{type(e).__name__}: {e}",
                 exc_info=True,
                 extra={"request_id": request_id}
             )
             raise
     
     def _generate_request_id(self) -> str:
-        """Generate a new request ID.
+        """Generate a new request ID using UUID4.
         
-        Uses UUID4 for guaranteed uniqueness across distributed systems.
+        UUID4 provides guaranteed uniqueness across distributed systems
+        without coordination or central authority.
         
         Returns:
-            UUID string (e.g., "550e8400-e29b-41d4-a716-446655440000")
+            UUID string (36 chars, e.g., "550e8400-e29b-41d4-a716-446655440000")
         """
         return str(uuid.uuid4())
     
     def _log_request(self, request: Request, request_id: str) -> None:
-        """Log incoming request details.
+        """Log incoming request with method and path.
         
         Args:
             request: HTTP request
-            request_id: Request ID
+            request_id: Request ID for correlation
         """
         logger.info(
             f"→ {request.method} {request.url.path}",
-            extra={
-                "request_id": request_id,
-                "method": request.method,
-                "path": request.url.path,
-                "query": str(request.query_params),
-                "client": request.client.host if request.client else None,
-                "user_agent": request.headers.get("user-agent"),
-            }
+            extra={"request_id": request_id}
         )
     
     def _log_response(
@@ -141,64 +155,39 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         request_id: str,
         duration: float
     ) -> None:
-        """Log response details with timing.
+        """Log response with status code and timing.
+        
+        Log level varies by status code:
+        - 2xx/3xx: INFO (success)
+        - 4xx: WARN (client error)
+        - 5xx: ERROR (server error)
         
         Args:
             request: HTTP request
             response: HTTP response
-            request_id: Request ID
+            request_id: Request ID for correlation
             duration: Request duration in seconds
         """
         # Determine log level based on status code
-        if response.status_code >= 500:
+        status = response.status_code
+        if status >= 500:
             log_level = logging.ERROR
-        elif response.status_code >= 400:
+        elif status >= 400:
             log_level = logging.WARNING
         else:
             log_level = logging.INFO
         
+        duration_ms = duration * 1000
+        
         logger.log(
             log_level,
-            f"← {request.method} {request.url.path} {response.status_code} ({duration*1000:.2f}ms)",
+            f"← {request.method} {request.url.path} {status} ({duration_ms:.2f}ms)",
             extra={
                 "request_id": request_id,
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": response.status_code,
-                "duration_ms": round(duration * 1000, 2),
+                "status_code": status,
+                "duration_ms": round(duration_ms, 2)
             }
         )
-
-
-# ============================================================================
-# Context Filter for Logging
-# ============================================================================
-
-class RequestIDFilter(logging.Filter):
-    """Logging filter that adds request_id to all log records.
-    
-    Extracts request_id from contextvars or log record extras.
-    Useful for correlating logs across multiple handlers.
-    
-    Usage:
-        logger = logging.getLogger()
-        logger.addFilter(RequestIDFilter())
-    """
-    
-    def filter(self, record: logging.LogRecord) -> bool:
-        """Add request_id to log record if not present.
-        
-        Args:
-            record: Log record to filter
-            
-        Returns:
-            True (always include record)
-        """
-        # Add request_id if not already present
-        if not hasattr(record, "request_id"):
-            record.request_id = getattr(record, "request_id", "-")
-        
-        return True
 
 
 # ============================================================================
@@ -208,18 +197,21 @@ class RequestIDFilter(logging.Filter):
 def get_request_id(request: Request) -> str | None:
     """Get request ID from request state.
     
+    Helper function for accessing request ID in route handlers.
+    
     Args:
         request: FastAPI request
         
     Returns:
-        Request ID or None if not available
+        Request ID or None if middleware not active
         
     Example:
-        >>> from fastapi import Request
-        >>> 
-        >>> @app.get("/")
+        >>> @app.get("/example")
         >>> async def handler(request: Request):
         ...     request_id = get_request_id(request)
-        ...     logger.info(f"Processing {request_id}")
+        ...     logger.info(f"Processing request {request_id}")
     """
     return getattr(request.state, "request_id", None)
+
+
+logger.debug("Request ID middleware module loaded")

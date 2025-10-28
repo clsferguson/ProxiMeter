@@ -1,12 +1,20 @@
-"""RTSP stream utilities for FFmpeg-based stream processing.
+"""RTSP stream utilities for FFmpeg-based processing.
 
-Constitution-compliant utilities for RTSP stream validation and FFmpeg
-command generation. No OpenCV - all stream processing uses FFmpeg.
+FFmpeg-only utilities for RTSP stream validation and command generation.
+No OpenCV VideoCapture - all stream processing uses FFmpeg with GPU acceleration.
 
-Principle II: FFmpeg handles ALL RTSP stream ingestion, decoding, and
-frame extraction.
+Constitution Compliance:
+    Principle II: FFmpeg handles ALL RTSP ingestion, decoding, frame extraction
+    Principle III: GPU backend contract with hardware acceleration
+    Principle IV: Security controls with input validation
 
-Principle III: GPU backend contract with hardware acceleration support.
+Logging Strategy:
+    DEBUG - Command building, probe results, validation details
+    WARN  - Invalid URLs, security violations, GPU mismatches
+    ERROR - Probe failures, exceptions
+
+FFmpeg Pipeline:
+    RTSP → FFmpeg (GPU decode) → MJPEG stdout → Parse frames → Web/API
 """
 from __future__ import annotations
 
@@ -23,13 +31,10 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 DEFAULT_PROBE_TIMEOUT: Final[float] = 5.0
-"""Default timeout for RTSP stream probing (seconds)."""
+"""Default RTSP probe timeout in seconds."""
 
 FORBIDDEN_SHELL_CHARS: Final[set[str]] = {";", "&", "|", ">", "<", "`", "$", "\n", "\r"}
-"""Shell metacharacters forbidden in FFmpeg parameters for security."""
-
-GPU_FFMPEG_FLAGS: Final[set[str]] = {"-hwaccel", "-hwaccel_output_format", "-c:v"}
-"""FFmpeg flags that indicate GPU acceleration usage."""
+"""Shell metacharacters forbidden for security."""
 
 # ============================================================================
 # FFmpeg Command Building
@@ -40,24 +45,22 @@ def build_ffmpeg_command(
     ffmpeg_params: list[str],
     gpu_backend: str | None = None
 ) -> list[str]:
-    """Build FFmpeg command for RTSP stream processing with GPU acceleration.
+    """Build FFmpeg command for RTSP processing with GPU acceleration.
     
-    Constructs FFmpeg command that:
-    - Decodes RTSP stream using GPU (if available)
-    - Forces target FPS output
-    - Outputs MJPEG to stdout for piping
-    - Includes user-provided custom parameters
-    
-    Constitution Principle II: FFmpeg for all RTSP processing.
-    Constitution Principle III: GPU backend contract enforcement.
+    Command structure:
+    1. User params (can override defaults)
+    2. Input (-i rtsp://...)
+    3. FPS limiter (-r 5)
+    4. GPU download filter (if using GPU)
+    5. MJPEG output to stdout
     
     Args:
         rtsp_url: RTSP URL to process
-        ffmpeg_params: User-provided FFmpeg parameters (already validated)
-        gpu_backend: GPU backend (nvidia, amd, intel, or None for CPU)
+        ffmpeg_params: User-provided parameters (validated)
+        gpu_backend: GPU backend (nvidia/amd/intel/none)
         
     Returns:
-        List of command arguments for subprocess execution
+        Command list for subprocess.run()
         
     Example:
         >>> cmd = build_ffmpeg_command(
@@ -65,78 +68,68 @@ def build_ffmpeg_command(
         ...     ["-rtsp_transport", "tcp"],
         ...     "nvidia"
         ... )
-        >>> # Run with: subprocess.run(cmd, stdout=subprocess.PIPE)
     """
     cmd = ["ffmpeg"]
     
-    logger.debug(f"Building FFmpeg command with GPU backend: {gpu_backend}")
-    logger.debug(f"User ffmpeg_params: {ffmpeg_params}")
-
-    # Add user-provided parameters first (allows overriding defaults)
+    logger.debug(f"Building FFmpeg command: GPU={gpu_backend}, params={len(ffmpeg_params)}")
+    
+    # User params first (allows override)
     cmd.extend(ffmpeg_params)
     
-    # Add input
+    # Input
     cmd.extend(["-i", rtsp_url])
     
-    # Force FPS output
+    # Force 5fps output (constitution requirement)
     cmd.extend(["-r", "5"])
     
-    # Add hwdownload filter if using GPU acceleration
+    # GPU download filter if using hardware acceleration
     if gpu_backend and gpu_backend != "none":
         cmd.extend(["-vf", "hwdownload,format=nv12"])
-
-    # Output configuration: MJPEG to stdout
+        logger.debug(f"Added GPU download filter for {gpu_backend}")
+    
+    # MJPEG output to stdout
     cmd.extend([
-        "-c:v", "mjpeg",           # MJPEG codec
-        "-q:v", "8",               # Quality (1-31, lower is better; 8 is high quality)
-        "-f", "mjpeg",             # MJPEG format
-        "-"                        # Output to stdout
+        "-c:v", "mjpeg",
+        "-q:v", "8",  # Quality 8 (high quality, 1-31 scale)
+        "-f", "mjpeg",
+        "-"  # stdout
     ])
     
-    logger.debug(f"Final FFmpeg command: {' '.join(cmd)}")
-
     return cmd
 
 
 # ============================================================================
-# RTSP Stream Probing (FFmpeg-based)
+# RTSP Stream Probing
 # ============================================================================
 
 async def probe_rtsp_stream(
     rtsp_url: str,
     timeout_seconds: float = DEFAULT_PROBE_TIMEOUT
 ) -> bool:
-    """Probe RTSP stream connectivity using FFmpeg.
+    """Probe RTSP stream connectivity using ffprobe.
     
-    Uses FFmpeg to verify stream is accessible and decodable.
-    Attempts to read stream metadata without processing full frames.
-    
-    Constitution Principle II: FFmpeg for all RTSP operations.
+    Verifies stream is accessible and decodable without processing frames.
     
     Args:
         rtsp_url: RTSP URL to probe
-        timeout_seconds: Timeout for probe attempt (default: 5.0 seconds)
+        timeout_seconds: Probe timeout (default: 5.0)
         
     Returns:
-        True if stream is accessible and valid, False otherwise
-        
-    Example:
-        >>> if await probe_rtsp_stream("rtsp://cam/stream"):
-        ...     print("Stream is accessible")
+        True if accessible, False otherwise
     """
     try:
-        # Use ffprobe to check stream metadata
         cmd = [
             "ffprobe",
-            "-v", "quiet",                    # Suppress output
-            "-print_format", "json",          # JSON output format
-            "-show_streams",                   # Show stream info
-            "-rtsp_transport", "tcp",         # Use TCP
-            "-timeout", str(int(timeout_seconds * 1000000)),  # Timeout in microseconds
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_streams",
+            "-rtsp_transport", "tcp",
+            "-timeout", str(int(timeout_seconds * 1000000)),  # microseconds
             rtsp_url
         ]
         
-        # Run probe with timeout
+        logger.debug(f"Probing RTSP stream: {rtsp_url}")
+        
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=subprocess.PIPE,
@@ -149,26 +142,24 @@ async def probe_rtsp_stream(
                 timeout=timeout_seconds
             )
             
-            # Check if probe succeeded
             if process.returncode == 0 and stdout:
-                logger.debug(f"RTSP probe successful: {rtsp_url}")
+                logger.debug(f"Probe successful: {rtsp_url}")
                 return True
             
-            # Log error if probe failed
             if stderr:
                 error_msg = stderr.decode().strip()
-                logger.debug(f"RTSP probe failed for {rtsp_url}: {error_msg}")
+                logger.debug(f"Probe failed: {error_msg}")
             
             return False
             
         except asyncio.TimeoutError:
-            logger.debug(f"RTSP probe timeout for {rtsp_url} after {timeout_seconds}s")
+            logger.debug(f"Probe timeout after {timeout_seconds}s")
             process.kill()
             await process.wait()
             return False
             
     except Exception as e:
-        logger.debug(f"RTSP probe error for {rtsp_url}: {e}")
+        logger.debug(f"Probe error: {e}")
         return False
 
 
@@ -177,129 +168,60 @@ async def probe_rtsp_stream(
 # ============================================================================
 
 def validate_rtsp_url(url: str, params: list[str], gpu_backend: str) -> bool:
-    """Validate RTSP URL and FFmpeg parameters for security and compatibility.
+    """Validate RTSP URL and FFmpeg params for security and compatibility.
     
     Checks:
     - URL format and protocol (rtsp:// or rtsps://)
     - Shell injection risks in parameters
-    - GPU parameter compatibility with detected hardware
-    
-    Constitution Principle III: GPU backend validation.
-    Constitution Principle IV: Security controls with input validation.
+    - GPU parameter compatibility
     
     Args:
         url: RTSP URL to validate
-        params: FFmpeg parameters to validate
-        gpu_backend: Detected GPU backend (nvidia, amd, intel, none)
+        params: FFmpeg parameters
+        gpu_backend: Detected GPU (nvidia/amd/intel/none)
         
     Returns:
-        True if valid and safe, False otherwise
-        
-    Example:
-        >>> if validate_rtsp_url(url, params, "nvidia"):
-        ...     # Safe to proceed
-        ...     cmd = build_ffmpeg_command(...)
+        True if valid and safe
     """
-    # Validate URL format
+    # Validate URL
     if not url or not isinstance(url, str):
-        logger.warning("RTSP URL is empty or invalid type")
+        logger.warning("Invalid URL: empty or wrong type")
         return False
     
     url_lower = url.lower()
-    if not url_lower.startswith("rtsp://") and not url_lower.startswith("rtsps://"):
-        logger.warning(f"Invalid RTSP URL scheme: {url}")
+    if not url_lower.startswith(("rtsp://", "rtsps://")):
+        logger.warning(f"Invalid scheme: {url[:20]}")
         return False
     
-    # Parse URL to check structure
+    # Parse URL structure
     try:
         parsed = urlparse(url)
         if not parsed.netloc:
-            logger.warning(f"RTSP URL missing host: {url}")
+            logger.warning("URL missing host")
             return False
     except Exception as e:
-        logger.warning(f"Failed to parse RTSP URL: {e}")
+        logger.warning(f"URL parse failed: {e}")
         return False
     
-    # Validate FFmpeg parameters for shell injection risks
+    # Validate params
     for param in params:
         if not isinstance(param, str):
-            logger.warning(f"Invalid FFmpeg param type: {type(param)}")
+            logger.warning(f"Invalid param type: {type(param)}")
             return False
         
-        # Check for forbidden shell characters
+        # Check shell injection risks
         if any(char in param for char in FORBIDDEN_SHELL_CHARS):
-            logger.warning(f"FFmpeg param contains forbidden characters: {param}")
+            logger.warning(f"Forbidden char in param: {param}")
             return False
     
-    # Validate GPU parameters match hardware
+    # Warn if GPU params but no GPU
     if gpu_backend == "none":
-        for param in params:
-            if any(flag in param for flag in GPU_FFMPEG_FLAGS):
-                logger.warning(f"GPU parameter '{param}' used but no GPU detected")
-                return False
+        gpu_flags = {"-hwaccel", "-hwaccel_output_format", "-c:v"}
+        if any(any(flag in param for flag in gpu_flags) for param in params):
+            logger.warning("GPU params used but no GPU detected")
+            return False
     
     return True
 
 
-def validate_ffmpeg_params(params: list[str]) -> tuple[bool, str | None]:
-    """Validate FFmpeg parameters for security and format.
-    
-    Ensures parameters are safe to pass to subprocess.
-    
-    Args:
-        params: List of FFmpeg parameter strings
-        
-    Returns:
-        Tuple of (is_valid, error_message)
-    """
-    if not isinstance(params, list):
-        return False, "FFmpeg params must be a list"
-    
-    for param in params:
-        if not isinstance(param, str):
-            return False, f"Invalid parameter type: {type(param)}"
-        
-        # Check for shell injection attempts
-        if any(char in param for char in FORBIDDEN_SHELL_CHARS):
-            return False, f"Parameter contains forbidden characters: {param}"
-        
-        # Ensure params are non-empty
-        if not param.strip():
-            return False, "Empty parameter not allowed"
-    
-    return True, None
-
-
-# ============================================================================
-# Utility Functions
-# ============================================================================
-
-def format_ffmpeg_command(cmd: list[str]) -> str:
-    """Format FFmpeg command for logging (mask sensitive info).
-    
-    Args:
-        cmd: FFmpeg command list
-        
-    Returns:
-        Formatted command string with credentials masked
-    """
-    formatted = []
-    for part in cmd:
-        if part.startswith("rtsp://") or part.startswith("rtsps://"):
-            # Mask credentials in RTSP URL
-            try:
-                parsed = urlparse(part)
-                if parsed.username or parsed.password:
-                    masked = f"{parsed.scheme}://*****:*****@{parsed.hostname}"
-                    if parsed.port:
-                        masked += f":{parsed.port}"
-                    masked += parsed.path
-                    formatted.append(masked)
-                else:
-                    formatted.append(part)
-            except:
-                formatted.append("rtsp://*****")
-        else:
-            formatted.append(part)
-    
-    return " ".join(formatted)
+logger.debug("RTSP utilities module loaded")

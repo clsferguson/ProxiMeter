@@ -1,21 +1,27 @@
 """Stream management service with FFmpeg process control.
 
-This service manages the lifecycle of RTSP stream processing using FFmpeg:
-- Creates and persists stream configurations
-- Starts/stops FFmpeg processes for stream decoding with GPU acceleration
-- Pipes MJPEG frames from FFmpeg stdout for web streaming and snapshots
-- Auto-starts streams on application startup
-- Coordinates hardware acceleration (CUDA/NVDEC, ROCm, Intel)
+Manages RTSP stream lifecycle with GPU-accelerated FFmpeg processing:
+- Stream CRUD with YAML persistence
+- FFmpeg subprocess management (start/stop)
+- MJPEG frame piping from FFmpeg stdout
+- Auto-start on creation and application boot
+- Hardware acceleration (CUDA/NVDEC, ROCm, QSV)
 
-Constitution-compliant:
-- GPU-only operation (no CPU fallback)
-- FFmpeg for ALL stream processing
-- 5fps cap enforced
-- Full resolution preservation
-- No video storage beyond live frames
+FFmpeg Pipeline:
+    RTSP → FFmpeg (GPU decode) → MJPEG stdout → Parse frames → Web/API
 
-Updated: Replaced OpenCV VideoCapture with direct FFmpeg MJPEG piping
-for better GPU integration and constitution compliance.
+Constitution Compliance:
+    - GPU-only operation (fail-fast if unavailable)
+    - FFmpeg for ALL processing (no OpenCV VideoCapture)
+    - 5fps cap enforced
+    - Full resolution preserved
+    - No video storage (live frames only)
+
+Logging Strategy:
+    DEBUG - Process details, buffer operations, frame parsing
+    INFO  - Stream lifecycle, FFmpeg starts, auto-start
+    WARN  - GPU unavailable, RTSP unreachable, process timeouts
+    ERROR - FFmpeg failures, exceptions with stack traces
 """
 from __future__ import annotations
 
@@ -34,19 +40,18 @@ from ..utils.rtsp import probe_rtsp_stream, build_ffmpeg_command, validate_rtsp_
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================================
 # Constants
 # ============================================================================
 
 DEFAULT_PROBE_TIMEOUT: Final[float] = 5.0
-"""Timeout in seconds for probing RTSP stream connectivity."""
+"""Timeout for RTSP stream connectivity probe."""
 
 STREAM_STOP_TIMEOUT: Final[float] = 5.0
-"""Timeout in seconds for gracefully stopping FFmpeg process."""
+"""Graceful shutdown timeout before SIGKILL."""
 
 FRAME_READ_TIMEOUT: Final[float] = 2.0
-"""Timeout in seconds for reading a single frame from FFmpeg."""
+"""Timeout for reading single frame from FFmpeg stdout."""
 
 JPEG_START_MARKER: Final[bytes] = b'\xff\xd8'
 """JPEG SOI (Start of Image) marker."""
@@ -54,50 +59,38 @@ JPEG_START_MARKER: Final[bytes] = b'\xff\xd8'
 JPEG_END_MARKER: Final[bytes] = b'\xff\xd9'
 """JPEG EOI (End of Image) marker."""
 
-
 # ============================================================================
 # Streams Service
 # ============================================================================
 
 class StreamsService:
-    """Service for managing RTSP streams with FFmpeg processing.
+    """Service for RTSP stream management with FFmpeg processing.
     
-    This service handles the complete lifecycle of stream processing:
-    1. Configuration persistence (YAML file storage)
-    2. FFmpeg subprocess management with GPU acceleration
-    3. MJPEG frame piping from FFmpeg stdout
-    4. Frame parsing for streaming and snapshots
-    5. Auto-start on creation and application startup
-    
-    FFmpeg Pipeline:
-    RTSP → FFmpeg (GPU decode) → MJPEG pipe → Parse frames → Web/API
-    
-    Constitution Compliance:
-    - GPU backend required (fail-fast if missing)
-    - FFmpeg handles ALL stream processing
-    - 5fps default, configurable 1-30fps
-    - No video storage (live frames only)
+    Handles complete stream lifecycle:
+    1. CRUD operations with YAML persistence
+    2. FFmpeg subprocess management
+    3. MJPEG frame piping and parsing
+    4. Auto-start on creation/boot
+    5. GPU acceleration coordination
     
     Attributes:
-        active_processes: Dict mapping stream_id to process info
-        gpu_backend: Detected GPU backend (nvidia, amd, intel, none)
+        active_processes: {stream_id: {"process": Process, "buffer": bytearray}}
+        gpu_backend: Detected GPU (nvidia/amd/intel/none)
     """
     
     def __init__(self) -> None:
-        """Initialize streams service and validate GPU backend.
+        """Initialize service and detect GPU backend.
         
-        Raises:
-            RuntimeError: If GPU backend is 'none' (constitution requirement)
+        Note: Does not raise if GPU unavailable - individual stream starts
+        will fail with clear error messages.
         """
         self.active_processes: dict[str, dict[str, Any]] = {}
         self.gpu_backend = get_gpu_backend()
         
-        # Constitution Principle III: GPU backend contract
         if self.gpu_backend == "none":
-            logger.error("No GPU backend detected - application requires GPU acceleration")
-            # Don't raise here, let individual stream starts fail with clear error
+            logger.warning("No GPU detected - stream starts will fail")
         else:
-            logger.info(f"StreamsService initialized with GPU backend: {self.gpu_backend}")
+            logger.info(f"StreamsService initialized: GPU={self.gpu_backend}")
     
     # ========================================================================
     # Stream Retrieval
@@ -109,24 +102,23 @@ class StreamsService:
             config = load_streams()
             streams = config.get("streams", [])
             streams.sort(key=lambda s: s.get("order", 0))
-            logger.debug(f"Listed {len(streams)} streams")
+            logger.debug(f"Listed {len(streams)} stream(s)")
             return streams
         except Exception as e:
-            logger.error(f"Error listing streams: {e}", exc_info=True)
+            logger.error(f"Failed to list streams: {e}", exc_info=True)
             return []
     
     async def get_stream(self, stream_id: str) -> dict | None:
-        """Get a stream by ID."""
+        """Get stream by ID."""
         try:
             config = load_streams()
-            streams = config.get("streams", [])
-            for stream in streams:
+            for stream in config.get("streams", []):
                 if stream.get("id") == stream_id:
                     return stream
-            logger.debug(f"Stream {stream_id} not found")
+            logger.debug(f"Stream not found: {stream_id}")
             return None
         except Exception as e:
-            logger.error(f"Error getting stream {stream_id}: {e}", exc_info=True)
+            logger.error(f"Failed to get stream {stream_id}: {e}", exc_info=True)
             return None
     
     # ========================================================================
@@ -141,72 +133,60 @@ class StreamsService:
         ffmpeg_params: list[str] | None = None,
         auto_start: bool = True
     ) -> dict:
-        """Create a new stream with validation and optional auto-start.
-        
-        Constitution Principle III: GPU backend validation on creation.
+        """Create new stream with validation and optional auto-start.
         
         Args:
-            name: Display name for stream (1-50 characters)
-            rtsp_url: RTSP URL to stream source
-            hw_accel_enabled: Whether to use GPU hardware acceleration
-            ffmpeg_params: Optional additional FFmpeg parameters (defaults applied if None/empty)
-            target_fps: Target frame rate for processing (1-30)
-            auto_start: Whether to automatically start stream on creation
+            name: Display name (1-50 chars)
+            rtsp_url: RTSP stream URL
+            hw_accel_enabled: Use GPU acceleration
+            ffmpeg_params: Custom FFmpeg args (defaults applied if empty)
+            auto_start: Auto-start on creation
             
         Returns:
-            Created stream dict with all fields
+            Created stream dict
             
         Raises:
-            ValueError: If validation fails
-            RuntimeError: If GPU required but not detected
+            ValueError: Invalid name/URL
+            RuntimeError: GPU required but unavailable
         """
-        # Normalize inputs
+        # Normalize
         name = name.strip()
         rtsp_url = rtsp_url.strip()
         
-        # Validate GPU requirements
+        # Validate GPU
         if hw_accel_enabled and self.gpu_backend == "none":
-            raise RuntimeError(
-                "Hardware acceleration requested but no GPU detected. "
-                "This application requires GPU acceleration (NVIDIA/AMD/Intel)."
-            )
+            raise RuntimeError("GPU acceleration unavailable")
         
         # Validate name
         if not name or len(name) > 50:
-            raise ValueError("Stream name must be 1-50 characters")
+            raise ValueError("Name must be 1-50 characters")
         
-        # Validate RTSP URL format
+        # Validate URL format
         is_valid, error_msg = validate_rtsp_url_format(rtsp_url)
         if not is_valid:
             raise ValueError(error_msg or "Invalid RTSP URL")
         
-        # Apply default FFmpeg params if none provided
-        # This ensures GPU acceleration flags are included when user leaves field empty
-        if not ffmpeg_params or len(ffmpeg_params) == 0:
+        # Apply defaults if no custom params
+        if not ffmpeg_params:
             ffmpeg_params = self._get_default_ffmpeg_params(hw_accel_enabled)
-            logger.info(f"Applying default FFmpeg params for {self.gpu_backend} backend")
-            logger.debug(f"Applied default FFmpeg params: {ffmpeg_params}") 
+            logger.debug(f"Applied default FFmpeg params for {self.gpu_backend}")
         else:
-            logger.info(f"Using custom FFmpeg params: {' '.join(ffmpeg_params)}")
-            logger.debug(f"Using custom FFmpeg params: {ffmpeg_params}")
+            logger.debug(f"Using {len(ffmpeg_params)} custom FFmpeg params")
         
-        # Load existing config
+        # Load config
         config = load_streams()
         streams = config.get("streams", [])
         
-        # Check for duplicate name (case-insensitive)
+        # Check duplicate name
         self._validate_unique_stream_name(streams, name)
         
-        # Probe RTSP stream connectivity
-        logger.info(f"Probing RTSP stream: {mask_rtsp_credentials(rtsp_url)}")
+        # Probe connectivity
+        logger.debug(f"Probing RTSP: {mask_rtsp_credentials(rtsp_url)}")
         is_reachable = await probe_rtsp_stream(rtsp_url, DEFAULT_PROBE_TIMEOUT)
         if not is_reachable:
-            logger.warning(f"RTSP URL not reachable: {mask_rtsp_credentials(rtsp_url)}")
+            logger.warning(f"RTSP unreachable: {mask_rtsp_credentials(rtsp_url)}")
         
-        # Determine initial status
-        initial_status = "stopped"
-        
-        # Create stream object
+        # Create stream
         stream = Stream(
             id=str(uuid.uuid4()),
             name=name,
@@ -216,7 +196,7 @@ class StreamsService:
             auto_start=auto_start,
             created_at=datetime.now(timezone.utc).isoformat(),
             order=len(streams),
-            status=initial_status
+            status="stopped"
         )
         
         # Persist
@@ -225,11 +205,11 @@ class StreamsService:
         config["streams"] = streams
         save_streams(config)
         
-        logger.info(f"Created stream {stream.id}: {name} (auto_start={auto_start})")
+        logger.info(f"Created stream: {name} ({stream.id}, auto_start={auto_start})")
         
         # Auto-start if enabled
         if auto_start:
-            logger.info(f"Auto-starting stream {stream.id}")
+            logger.info(f"Auto-starting: {stream.id}")
             asyncio.create_task(self.start_stream(stream.id, stream_dict))
         
         return stream_dict
@@ -248,14 +228,14 @@ class StreamsService:
         ffmpeg_params: list[str] | None = None,
         auto_start: bool | None = None
     ) -> dict | None:
-        """Update a stream (partial update)."""
+        """Update stream (partial update)."""
         config = load_streams()
         streams = config.get("streams", [])
         
         # Find stream
         stream_index = self._find_stream_index(streams, stream_id)
         if stream_index is None:
-            logger.debug(f"Stream {stream_id} not found")
+            logger.debug(f"Update failed - not found: {stream_id}")
             return None
         
         stream = streams[stream_index]
@@ -265,11 +245,11 @@ class StreamsService:
         if name is not None:
             name = name.strip()
             if not name or len(name) > 50:
-                raise ValueError("Stream name must be 1-50 characters")
+                raise ValueError("Name must be 1-50 characters")
             self._validate_unique_stream_name(streams, name, exclude_index=stream_index)
             stream["name"] = name
         
-        # Update RTSP URL
+        # Update URL
         if rtsp_url is not None:
             rtsp_url = rtsp_url.strip()
             is_valid, error_msg = validate_rtsp_url_format(rtsp_url)
@@ -278,23 +258,21 @@ class StreamsService:
             stream["rtsp_url"] = rtsp_url
             url_changed = True
         
-        # Update hardware acceleration
+        # Update HW accel
         if hw_accel_enabled is not None:
             if hw_accel_enabled and self.gpu_backend == "none":
-                raise RuntimeError("Hardware acceleration unavailable (no GPU detected)")
+                raise RuntimeError("GPU acceleration unavailable")
             stream["hw_accel_enabled"] = hw_accel_enabled
         
-        # Update FFmpeg params - apply defaults if explicitly set to empty
+        # Update FFmpeg params (apply defaults if cleared)
         if ffmpeg_params is not None:
-            if len(ffmpeg_params) == 0:
-                # User cleared the field - apply defaults
+            if not ffmpeg_params:
                 hw_accel = stream.get("hw_accel_enabled", True)
                 stream["ffmpeg_params"] = self._get_default_ffmpeg_params(hw_accel)
-                logger.info(f"Applied default FFmpeg params for stream {stream_id}")
+                logger.debug(f"Applied default params: {stream_id}")
             else:
-                # User provided custom params
                 stream["ffmpeg_params"] = ffmpeg_params
-                logger.info(f"Applied custom FFmpeg params for stream {stream_id}")
+                logger.debug(f"Applied custom params: {stream_id}")
         
         # Update auto-start
         if auto_start is not None:
@@ -302,10 +280,10 @@ class StreamsService:
         
         # Re-probe if URL changed
         if url_changed:
-            logger.info(f"Re-probing stream {stream_id}")
+            logger.debug(f"Re-probing: {stream_id}")
             is_reachable = await probe_rtsp_stream(stream["rtsp_url"], DEFAULT_PROBE_TIMEOUT)
             if not is_reachable:
-                logger.warning(f"Updated RTSP URL not reachable: {stream_id}")
+                logger.warning(f"Updated URL unreachable: {stream_id}")
         
         # Update status
         if status is not None:
@@ -315,29 +293,28 @@ class StreamsService:
         config["streams"] = streams
         save_streams(config)
         
-        logger.info(f"Updated stream {stream_id}")
+        logger.info(f"Updated stream: {stream_id}")
         return stream
-
     
     # ========================================================================
     # Stream Deletion
     # ========================================================================
     
     async def delete_stream(self, stream_id: str) -> bool:
-        """Delete a stream and stop it if running."""
-        # Stop stream if running
+        """Delete stream and stop if running."""
+        # Stop if running
         if stream_id in self.active_processes:
             await self.stop_stream(stream_id)
         
         config = load_streams()
         streams = config.get("streams", [])
         
-        # Find and remove
+        # Remove
         initial_count = len(streams)
         streams = [s for s in streams if s.get("id") != stream_id]
         
         if len(streams) == initial_count:
-            logger.debug(f"Stream {stream_id} not found")
+            logger.debug(f"Delete failed - not found: {stream_id}")
             return False
         
         # Renumber orders
@@ -347,7 +324,7 @@ class StreamsService:
         config["streams"] = streams
         save_streams(config)
         
-        logger.info(f"Deleted stream {stream_id}")
+        logger.info(f"Deleted stream: {stream_id}")
         return True
     
     # ========================================================================
@@ -359,9 +336,9 @@ class StreamsService:
         config = load_streams()
         streams = config.get("streams", [])
         
-        # No-op for 0 or 1 streams
+        # No-op for 0-1 streams
         if len(streams) <= 1:
-            logger.debug("Reorder no-op: ≤1 streams")
+            logger.debug("Reorder skipped: ≤1 streams")
             return True
         
         # Validate
@@ -369,12 +346,12 @@ class StreamsService:
             raise ValueError(f"Order must contain {len(streams)} IDs")
         
         if len(set(order)) != len(order):
-            raise ValueError("Order contains duplicate IDs")
+            raise ValueError("Duplicate IDs in order")
         
         # Build map
         stream_map = {s.get("id"): s for s in streams}
         
-        # Validate all IDs exist
+        # Validate IDs exist
         for stream_id in order:
             if stream_id not in stream_map:
                 raise ValueError(f"Unknown stream ID: {stream_id}")
@@ -382,7 +359,7 @@ class StreamsService:
         # Check if already correct (idempotent)
         current_order = [s.get("id") for s in streams]
         if current_order == order:
-            logger.debug("Reorder no-op: unchanged")
+            logger.debug("Reorder skipped: already correct")
             return True
         
         # Reorder
@@ -394,7 +371,8 @@ class StreamsService:
         
         config["streams"] = reordered
         save_streams(config)
-        logger.info(f"Reordered {len(reordered)} streams")
+        
+        logger.info(f"Reordered {len(reordered)} stream(s)")
         return True
     
     # ========================================================================
@@ -404,116 +382,95 @@ class StreamsService:
     async def auto_start_configured_streams(self) -> None:
         """Auto-start all streams with auto_start=True.
         
-        Called on application startup to resume previously running streams.
-        Constitution Principle II: Auto-start for continuous monitoring.
+        Called on application startup to resume streams.
         """
         try:
             streams = await self.list_streams()
-            auto_start_count = 0
+            auto_start_streams = [s for s in streams if s.get("auto_start", False)]
             
-            for stream in streams:
-                if stream.get("auto_start", False):
-                    stream_id = stream["id"]
-                    stream_name = stream.get("name", "Unknown")
-                    
-                    logger.info(f"Auto-starting stream: {stream_name} ({stream_id})")
-                    
-                    # Start as background task
-                    asyncio.create_task(self.start_stream(stream_id, stream))
-                    auto_start_count += 1
-            
-            if auto_start_count > 0:
-                logger.info(f"Queued {auto_start_count} streams for auto-start")
-            else:
+            if not auto_start_streams:
                 logger.info("No streams configured for auto-start")
+                return
+            
+            logger.info(f"Auto-starting {len(auto_start_streams)} stream(s)")
+            
+            for stream in auto_start_streams:
+                stream_id = stream["id"]
+                stream_name = stream.get("name", "Unknown")
+                logger.debug(f"Queuing auto-start: {stream_name} ({stream_id})")
+                asyncio.create_task(self.start_stream(stream_id, stream))
                 
         except Exception as e:
-            logger.error(f"Error during auto-start: {e}", exc_info=True)
-    
+            logger.error(f"Auto-start failed: {e}", exc_info=True)
+
     # ========================================================================
     # FFmpeg Process Control
     # ========================================================================
     
     async def start_stream(self, stream_id: str, stream: dict) -> bool:
-        """Start FFmpeg processing for a stream with MJPEG piping.
+        """Start FFmpeg processing with MJPEG piping.
         
-        Starts FFmpeg subprocess to decode RTSP stream and pipe MJPEG frames
-        to stdout for web streaming and snapshots.
-        
-        Constitution compliance:
-        - GPU backend required (fail-fast)
-        - FFmpeg for all stream processing
-        - 5fps cap enforced
-        - Full resolution preserved
+        Starts FFmpeg subprocess to decode RTSP and pipe MJPEG frames.
         
         Args:
-            stream_id: UUID of stream to start
-            stream: Stream configuration dict
+            stream_id: Stream UUID
+            stream: Stream config dict
             
         Returns:
-            True if started successfully, False otherwise
+            True if started successfully
         """
         try:
             if stream_id in self.active_processes:
-                logger.warning(f"Stream {stream_id} already running")
+                logger.warning(f"Already running: {stream_id}")
                 return True
             
-            # Constitution Principle III: GPU backend validation
+            # Validate GPU
             if self.gpu_backend == "none":
-                raise RuntimeError(
-                    "Cannot start stream: No GPU backend detected. "
-                    "This application requires GPU acceleration."
-                )
+                raise RuntimeError("GPU backend required")
             
-            # Validate GPU requirements
             if stream.get("hw_accel_enabled") and self.gpu_backend == "none":
-                raise ValueError("Hardware acceleration unavailable (no GPU detected)")
+                raise ValueError("GPU acceleration unavailable")
             
-            # Get parameters
+            # Get params
             url = stream["rtsp_url"]
             params = stream.get("ffmpeg_params", [])
             hw_accel = stream.get("hw_accel_enabled", False)
             
             # Validate
             if not validate_rtsp_url(url, params, self.gpu_backend):
-                raise ValueError("Invalid RTSP URL or FFmpeg params")
-
-            # Build command (FFmpeg pipes MJPEG to stdout)
+                raise ValueError("Invalid RTSP URL or params")
+            
+            # Build command
             cmd = build_ffmpeg_command(
                 rtsp_url=url,
                 ffmpeg_params=params,
                 gpu_backend=self.gpu_backend if hw_accel else None
             )
             
-            logger.info(f"Starting FFmpeg for {stream_id}: {mask_rtsp_credentials(url)}")
-            logger.debug(f"FFmpeg command: {' '.join(cmd)}")
-            logger.debug(f"GPU backend: {self.gpu_backend}, HW accel: {hw_accel}")
-
-            # PRE-REGISTER stream immediately (before subprocess creation)
-            # This ensures get_frame() won't fail even if subprocess takes time
+            logger.info(f"Starting FFmpeg: {stream_id} ({mask_rtsp_credentials(url)})")
+            logger.debug(f"GPU={self.gpu_backend}, HW_accel={hw_accel}, PID will be assigned")
+            
+            # Pre-register (prevents race condition in get_frame)
             self.active_processes[stream_id] = {
-                "process": None,  # Will be filled in after subprocess starts
+                "process": None,
                 "buffer": bytearray(),
             }
-            logger.debug(f"Pre-registered stream {stream_id} in active_processes")
-
-            # Start subprocess with stdout pipe
+            
+            # Start subprocess
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
             
-            logger.debug(f"FFmpeg process started with PID: {process.pid}")
-
-            # Update with actual process handle
+            # Update with process
             self.active_processes[stream_id]["process"] = process
-            logger.debug(f"Updated stream {stream_id} with process PID: {process.pid}")
-
+            logger.debug(f"FFmpeg started: PID={process.pid}")
+            
             # Start stderr monitor
             asyncio.create_task(self._monitor_ffmpeg_stderr(stream_id, process))
-
-            # Update status in config
+            
+            # Update config status
             config = load_streams()
             streams = config.get("streams", [])
             for s in streams:
@@ -522,33 +479,23 @@ class StreamsService:
                     break
             config["streams"] = streams
             save_streams(config)
-
-            # Wait briefly for process to initialize
+            
+            # Wait for initialization
             await asyncio.sleep(0.5)
             
-            # Check if process died immediately
+            # Check if died immediately
             if process.returncode is not None:
-                # Read ALL stderr output
                 stderr = await process.stderr.read() if process.stderr else b""
                 error_msg = stderr.decode().strip()
                 
-                # Log the full FFmpeg error
-                logger.error(f"❌ FFmpeg died immediately for {stream_id}")
-                logger.error(f"FFmpeg return code: {process.returncode}")
-                logger.error(f"FFmpeg stderr output:\n{error_msg}")
+                logger.error(f"FFmpeg died immediately: {stream_id}")
+                logger.error(f"Return code: {process.returncode}")
+                logger.error(f"FFmpeg stderr:\n{error_msg}")
                 
-                # Also print to console to bypass any logging filters
-                print(f"\n{'='*80}", flush=True)
-                print(f"❌ FFMPEG FAILED FOR STREAM: {stream_id}", flush=True)
-                print(f"Return Code: {process.returncode}", flush=True)
-                print(f"Error Output:", flush=True)
-                print(error_msg, flush=True)
-                print(f"{'='*80}\n", flush=True)
-                
-                # Cleanup on immediate failure
+                # Cleanup
                 self.active_processes.pop(stream_id, None)
                 
-                # Update status back to stopped
+                # Update status
                 config = load_streams()
                 streams = config.get("streams", [])
                 for s in streams:
@@ -558,20 +505,18 @@ class StreamsService:
                 config["streams"] = streams
                 save_streams(config)
                 
-                raise RuntimeError(f"FFmpeg failed to start (code {process.returncode}): {error_msg}")
+                raise RuntimeError(f"FFmpeg failed (code {process.returncode})")
             
-            # FFmpeg started successfully
-            logger.info(f"✅ Successfully started stream {stream_id} (PID: {process.pid}, GPU: {self.gpu_backend})")
+            logger.info(f"Stream started: {stream_id} (PID={process.pid})")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to start stream {stream_id}: {e}", exc_info=True)
+            logger.error(f"Failed to start {stream_id}: {e}", exc_info=True)
             
-            # Cleanup on failure
-            if stream_id in self.active_processes:
-                self.active_processes.pop(stream_id)
+            # Cleanup
+            self.active_processes.pop(stream_id, None)
             
-            # Update status to stopped on failure
+            # Update status
             try:
                 config = load_streams()
                 streams = config.get("streams", [])
@@ -582,30 +527,27 @@ class StreamsService:
                 config["streams"] = streams
                 save_streams(config)
             except Exception as config_err:
-                logger.error(f"Failed to update stream status on error: {config_err}")
+                logger.error(f"Failed to update status: {config_err}")
             
             return False
-
     
     async def stop_stream(self, stream_id: str) -> bool:
-        """Stop FFmpeg processing for a stream.
-        
-        Terminates FFmpeg process gracefully with fallback to kill.
-        """
+        """Stop FFmpeg processing gracefully."""
         if stream_id not in self.active_processes:
-            logger.warning(f"Stream {stream_id} not running")
+            logger.warning(f"Not running: {stream_id}")
             return False
         
         try:
             proc_data = self.active_processes.pop(stream_id)
             process = proc_data["process"]
             
-            # Terminate process
+            # Terminate
             process.terminate()
             try:
                 await asyncio.wait_for(process.wait(), timeout=STREAM_STOP_TIMEOUT)
+                logger.debug(f"FFmpeg terminated gracefully: {stream_id}")
             except asyncio.TimeoutError:
-                logger.warning(f"Stream {stream_id} timeout, killing")
+                logger.warning(f"Timeout, killing: {stream_id}")
                 process.kill()
                 await process.wait()
             
@@ -619,11 +561,11 @@ class StreamsService:
             config["streams"] = streams
             save_streams(config)
             
-            logger.info(f"Stopped stream {stream_id}")
+            logger.info(f"Stream stopped: {stream_id}")
             return True
             
         except Exception as e:
-            logger.error(f"Error stopping stream {stream_id}: {e}", exc_info=True)
+            logger.error(f"Failed to stop {stream_id}: {e}", exc_info=True)
             return False
     
     # ========================================================================
@@ -631,88 +573,74 @@ class StreamsService:
     # ========================================================================
     
     async def get_frame(self, stream_id: str) -> tuple[bool, bytes] | None:
-        """Get next MJPEG frame from FFmpeg stdout pipe.
+        """Get next MJPEG frame from FFmpeg stdout.
         
-        Reads from FFmpeg stdout, parses JPEG markers, and returns complete
-        JPEG frame. This is used for both MJPEG streaming and snapshots.
-        
-        Constitution Principle II: Live frames only, no storage.
+        Reads from FFmpeg stdout, parses JPEG markers, returns complete frame.
         
         Args:
-            stream_id: UUID of stream to read from
+            stream_id: Stream UUID
             
         Returns:
-            Tuple of (success, jpeg_bytes) if frame available, None otherwise
+            (success, jpeg_bytes) if available, None if stream ended
         """
         if stream_id not in self.active_processes:
-            logger.warning(f"Stream {stream_id} not in active_processes")
+            logger.warning(f"Frame request for inactive stream: {stream_id}")
             return None
         
         proc_data = self.active_processes[stream_id]
         process = proc_data["process"]
         buffer = proc_data["buffer"]
         
-        # Check if process is still alive
+        # Check if alive
         if process.returncode is not None:
-            logger.error(f"FFmpeg process for {stream_id} has died (returncode: {process.returncode})")
+            logger.error(f"FFmpeg dead (code {process.returncode}): {stream_id}")
             return None
         
         try:
-            # Keep reading until we have a complete frame
+            # Read until complete frame found
             max_attempts = 50
-            attempts = 0
             
-            logger.debug(f"[{stream_id}] Starting frame extraction, buffer size: {len(buffer)}")
-            
-            while attempts < max_attempts:
-                attempts += 1
-                
-                # Check if we already have a complete frame in buffer
+            for attempt in range(max_attempts):
+                # Check buffer for complete frame
                 start_idx = buffer.find(JPEG_START_MARKER)
                 if start_idx != -1:
                     end_idx = buffer.find(JPEG_END_MARKER, start_idx + 2)
                     if end_idx != -1:
-                        # Extract complete JPEG frame
+                        # Extract frame
                         jpeg_data = bytes(buffer[start_idx:end_idx + 2])
-                        
-                        # Remove processed data from buffer
                         del buffer[:end_idx + 2]
                         
-                        logger.info(f"[{stream_id}] ✅ Extracted frame: {len(jpeg_data)} bytes")
+                        logger.debug(f"Frame extracted: {len(jpeg_data)} bytes")
                         return (True, jpeg_data)
                 
-                # Need more data - read chunk from stdout
+                # Need more data
                 try:
                     chunk = await asyncio.wait_for(
                         process.stdout.read(8192),
-                        timeout=2.0  # Increased timeout
+                        timeout=FRAME_READ_TIMEOUT
                     )
                 except asyncio.TimeoutError:
-                    logger.warning(f"[{stream_id}] Timeout reading from FFmpeg stdout (attempt {attempts}/{max_attempts})")
+                    logger.debug(f"Read timeout (attempt {attempt + 1}/{max_attempts})")
                     continue
                 
                 if not chunk:
-                    logger.error(f"[{stream_id}] FFmpeg stdout closed (no data)")
+                    logger.error(f"FFmpeg stdout closed: {stream_id}")
                     return None
                 
-                # Append to buffer
                 buffer.extend(chunk)
-                logger.debug(f"[{stream_id}] Read {len(chunk)} bytes, buffer now {len(buffer)} bytes")
                 
-                # Prevent buffer from growing unbounded (10MB limit)
+                # Prevent unbounded growth (10MB limit)
                 if len(buffer) > 10 * 1024 * 1024:
-                    logger.warning(f"[{stream_id}] Buffer overflow, resetting")
+                    logger.warning(f"Buffer overflow, resetting: {stream_id}")
                     buffer[:] = buffer[-1024*1024:]
             
             # Max attempts reached
-            logger.error(f"[{stream_id}] Failed to extract frame after {max_attempts} attempts")
-            logger.debug(f"[{stream_id}] Buffer preview (first 100 bytes): {buffer[:100].hex()}")
+            logger.error(f"Failed to extract frame after {max_attempts} attempts: {stream_id}")
             return (False, b'')
                 
         except Exception as e:
-            logger.error(f"[{stream_id}] Error reading frame: {e}", exc_info=True)
+            logger.error(f"Frame read error for {stream_id}: {e}", exc_info=True)
             return None
-
     
     # ========================================================================
     # Helper Methods
@@ -739,23 +667,18 @@ class StreamsService:
                 continue
             
             if normalize_stream_name(stream.get("name", "")) == normalized_name:
-                raise ValueError(
-                    f"Stream name '{name}' already exists (case-insensitive)"
-                )
-
+                raise ValueError(f"Stream name '{name}' already exists")
+    
     def _get_default_ffmpeg_params(self, hw_accel_enabled: bool) -> list[str]:
-        """Get default FFmpeg parameters based on GPU backend.
-        
-        Applies GPU-specific hardware acceleration flags if enabled.
-        These defaults match the frontend placeholder text.
+        """Get default FFmpeg parameters for GPU backend.
         
         Args:
-            hw_accel_enabled: Whether to include GPU acceleration flags
+            hw_accel_enabled: Include GPU acceleration flags
             
         Returns:
             List of FFmpeg parameter strings
         """
-        # Base parameters (always applied)
+        # Base params (always applied)
         params = [
             '-hide_banner',
             '-loglevel', 'warning',
@@ -769,7 +692,7 @@ class StreamsService:
             '-flags', 'low_delay',
         ]
         
-        # Add GPU-specific parameters if hardware acceleration enabled
+        # Add GPU params if enabled
         if hw_accel_enabled and self.gpu_backend != "none":
             if self.gpu_backend == "nvidia":
                 params.extend([
@@ -789,19 +712,21 @@ class StreamsService:
         
         return params
     
-    async def _monitor_ffmpeg_stderr(self, stream_id: str, process: asyncio.subprocess.Process) -> None:
+    async def _monitor_ffmpeg_stderr(
+        self,
+        stream_id: str,
+        process: asyncio.subprocess.Process
+    ) -> None:
         """Monitor FFmpeg stderr for errors and warnings.
         
-        Runs as background task to continuously read and log FFmpeg output.
+        Runs as background task to continuously read FFmpeg output.
         """
-        # Check if stderr is available
         if process.stderr is None:
-            logger.warning(f"FFmpeg stderr not available for monitoring stream {stream_id}")
+            logger.warning(f"FFmpeg stderr unavailable: {stream_id}")
             return
         
         try:
             while process.returncode is None:
-                # Read stderr line by line
                 try:
                     line = await asyncio.wait_for(
                         process.stderr.readline(),
@@ -815,22 +740,24 @@ class StreamsService:
                     if not message:
                         continue
                     
-                    # Log FFmpeg messages at appropriate levels
-                    if 'error' in message.lower() or 'fatal' in message.lower():
+                    # Log by severity
+                    msg_lower = message.lower()
+                    if 'error' in msg_lower or 'fatal' in msg_lower:
                         logger.error(f"FFmpeg [{stream_id}]: {message}")
-                    elif 'warning' in message.lower():
+                    elif 'warning' in msg_lower:
                         logger.warning(f"FFmpeg [{stream_id}]: {message}")
-                    elif 'deprecated' in message.lower():
+                    elif 'deprecated' in msg_lower:
                         logger.debug(f"FFmpeg [{stream_id}]: {message}")
                     else:
-                        # Info/debug messages
                         logger.debug(f"FFmpeg [{stream_id}]: {message}")
                         
                 except asyncio.TimeoutError:
-                    # No output yet, continue monitoring
                     continue
                 
         except asyncio.CancelledError:
-            logger.debug(f"FFmpeg stderr monitor cancelled for {stream_id}")
+            logger.debug(f"FFmpeg stderr monitor cancelled: {stream_id}")
         except Exception as e:
-            logger.error(f"Error monitoring FFmpeg stderr for {stream_id}: {e}")
+            logger.error(f"Stderr monitor error for {stream_id}: {e}")
+
+
+logger.debug("StreamsService module loaded")
