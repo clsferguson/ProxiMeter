@@ -1,4 +1,10 @@
-"""Structured JSON logging configuration with credential redaction."""
+"""Structured logging configuration with credential redaction.
+
+Provides clean, readable logs in format:
+timestamp | level | message | logger
+
+Can switch to JSON format by setting LOG_FORMAT=json
+"""
 from __future__ import annotations
 
 import json
@@ -37,6 +43,12 @@ class LogLevel(str, Enum):
     WARNING = "WARNING"
     ERROR = "ERROR"
     CRITICAL = "CRITICAL"
+
+
+class LogFormat(str, Enum):
+    """Supported log formats."""
+    TEXT = "text"
+    JSON = "json"
 
 
 # ============================================================================
@@ -81,8 +93,46 @@ def log_ffmpeg_stderr(stream_id: str, stderr_data: bytes) -> None:
 
 
 # ============================================================================
-# JSON Formatter
+# Formatters
 # ============================================================================
+
+class TextFormatter(logging.Formatter):
+    """Clean text formatter: timestamp | level | message | logger
+    
+    Example output:
+        2025-10-28T05:10:23.456Z | INFO | Server starting | app.main
+        2025-10-28T05:10:24.789Z | ERROR | Connection failed | app.services.streams
+    """
+    
+    def format(self, record: logging.LogRecord) -> str:
+        """Format a log record as clean text.
+        
+        Args:
+            record: Log record to format
+            
+        Returns:
+            Formatted log line: timestamp | level | message | logger
+        """
+        # Get and redact the message
+        message = record.getMessage()
+        message = redact_credentials(message)
+        
+        # Format timestamp in ISO 8601 UTC
+        timestamp = datetime.fromtimestamp(
+            record.created,
+            tz=timezone.utc
+        ).isoformat()
+        
+        # Build log line
+        log_line = f"{timestamp} | {record.levelname:8s} | {message} | {record.name}"
+        
+        # Add exception if present
+        if record.exc_info:
+            exception_text = self.formatException(record.exc_info)
+            log_line += f"\n{redact_credentials(exception_text)}"
+        
+        return log_line
+
 
 class JSONFormatter(logging.Formatter):
     """Format log records as structured JSON with credential redaction.
@@ -93,8 +143,8 @@ class JSONFormatter(logging.Formatter):
     Each log record is formatted as a single-line JSON object with:
     - timestamp: ISO 8601 formatted UTC timestamp
     - level: Log level name (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-    - logger: Logger name (hierarchical, e.g., "app.api.streams")
     - message: Log message with redacted credentials
+    - logger: Logger name (hierarchical, e.g., "app.api.streams")
     - exception: Full exception traceback if present
     - extra_*: Any additional fields from the log record
     """
@@ -119,8 +169,8 @@ class JSONFormatter(logging.Formatter):
                 tz=timezone.utc
             ).isoformat(),
             "level": record.levelname,
-            "logger": record.name,
             "message": message,
+            "logger": record.name,
         }
         
         # Add exception information if present
@@ -164,11 +214,26 @@ def get_log_level() -> int:
         return logging.INFO
 
 
+def get_log_format() -> LogFormat:
+    """Get log format from environment.
+    
+    Returns:
+        LogFormat enum value (TEXT or JSON)
+    """
+    log_format_str = os.getenv("LOG_FORMAT", "text").lower()
+    
+    try:
+        return LogFormat(log_format_str)
+    except ValueError:
+        logging.warning(f"Invalid LOG_FORMAT '{log_format_str}', defaulting to text")
+        return LogFormat.TEXT
+
+
 def configure_logging() -> None:
-    """Configure structured JSON logging for the application.
+    """Configure structured logging for the application.
     
     Sets up:
-    - Root logger with JSON formatting
+    - Root logger with clean text formatting (or JSON if LOG_FORMAT=json)
     - Console (stdout) handler for container-friendly logging
     - Log level from LOG_LEVEL environment variable
     - Credential redaction for security
@@ -177,8 +242,11 @@ def configure_logging() -> None:
     Environment Variables:
         LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
                   Defaults to INFO if not set or invalid
+        LOG_FORMAT: Log format (text, json)
+                   Defaults to text if not set or invalid
     """
     log_level = get_log_level()
+    log_format = get_log_format()
     
     # Configure root logger
     root_logger = logging.getLogger()
@@ -188,10 +256,15 @@ def configure_logging() -> None:
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
     
-    # Create and configure stdout handler with JSON formatting
+    # Create and configure stdout handler with appropriate formatter
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(log_level)
-    console_handler.setFormatter(JSONFormatter())
+    
+    if log_format == LogFormat.JSON:
+        console_handler.setFormatter(JSONFormatter())
+    else:
+        console_handler.setFormatter(TextFormatter())
+    
     root_logger.addHandler(console_handler)
     
     # Configure FastAPI/Uvicorn loggers to use our format
@@ -203,7 +276,7 @@ def configure_logging() -> None:
     # Log successful initialization
     root_logger.info(
         f"Logging configured: level={logging.getLevelName(log_level)}, "
-        f"format=JSON, redaction=enabled"
+        f"format={log_format.value}, redaction=enabled"
     )
 
 

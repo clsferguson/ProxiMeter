@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Check if debug logging is enabled
+DEBUG_MODE=false
+if [ "${LOG_LEVEL}" = "DEBUG" ]; then
+    DEBUG_MODE=true
+fi
+
 # ============================================================================
 # Version Info
 # ============================================================================
@@ -58,14 +64,16 @@ echo "🎯 Selected GPU Backend: $GPU_BACKEND_DETECTED"
 # ============================================================================
 # FFmpeg GPU Capability Check
 # ============================================================================
-echo ""
-echo "🔧 FFmpeg hardware acceleration support:"
-ffmpeg -hwaccels 2>&1 | tail -n +2 | head -n -1 | sed 's/^/   /'
-
-if ffmpeg -hwaccels 2>&1 | grep -qE "cuda|vaapi|qsv"; then
-    echo "✅ GPU acceleration available"
-else
-    echo "⚠️  No GPU acceleration in FFmpeg"
+if [ "$DEBUG_MODE" = true ]; then
+    echo ""
+    echo "🔧 FFmpeg hardware acceleration methods:"
+    ffmpeg -hwaccels 2>&1 | tail -n +2 | sed 's/^/   /'
+    
+    if ffmpeg -hwaccels 2>&1 | grep -qE "cuda|vaapi|qsv"; then
+        echo "✅ GPU acceleration available"
+    else
+        echo "⚠️  No GPU acceleration in FFmpeg"
+    fi
 fi
 
 # ============================================================================
