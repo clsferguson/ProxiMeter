@@ -5,6 +5,7 @@ This module provides FastAPI routes for managing RTSP streams with GPU accelerat
 Updated for GPU-only architecture:
 - Enforces GPU backend detection from entrypoint.sh
 - No CPU fallback (fail-fast)
+- Uses singleton StreamsService from main.py (CRITICAL FIX)
 - Adds snapshot endpoint for dashboard thumbnails
 - 5fps MJPEG streaming at full resolution
 - Constitution-compliant security and observability
@@ -29,6 +30,14 @@ from ..services.streams_service import StreamsService
 from ..utils.rtsp import validate_rtsp_url, build_ffmpeg_command
 from ..utils.strings import mask_rtsp_credentials
 from ..config_io import get_gpu_backend
+
+# ============================================================================
+# CRITICAL FIX: Import singleton service getter from main.py
+# ============================================================================
+# This ensures ALL requests use the SAME StreamsService instance with the
+# SAME active_processes dict. Without this, each request creates a new
+# service with an empty dict, causing "Stream not in active_processes" errors.
+from ..main import get_streams_service
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +66,10 @@ _start_lock = asyncio.Lock()
 # ============================================================================
 # Dependencies
 # ============================================================================
-
-def get_streams_service() -> StreamsService:
-    """Dependency injection for streams service."""
-    return StreamsService()
+# 
+# NOTE: The get_streams_service dependency is now imported from main.py
+# It returns the singleton StreamsService instance created at startup.
+# DO NOT define a new get_streams_service() function here!
 
 
 # ============================================================================
@@ -597,7 +606,7 @@ async def get_snapshot(
     Raises:
         HTTPException: 404 if not found, 400 if not running, 503 if frame unavailable
     """
-    logger.debug(f"📸 Snapshot request received for stream {stream_id}")
+    logger.info(f"📸 Snapshot request received for stream {stream_id}")
     
     stream = await service.get_stream(stream_id)
     if not stream:
@@ -675,7 +684,6 @@ async def get_snapshot(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to capture snapshot"
         )
-
 
 
 @router.get("/{stream_id}/scores")
