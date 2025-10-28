@@ -1,9 +1,8 @@
 /**
  * StreamCard Component - Stream Thumbnail Display
  * 
- * Displays stream information with a single static JPEG snapshot preview.
- * Snapshot only refreshes when user manually clicks the refresh button.
- * Click "Play" to open full streaming view in new window.
+ * Displays a SINGLE STATIC snapshot. No auto-refresh, no overlays.
+ * User must manually click refresh button to get a new snapshot.
  * 
  * @module components/StreamCard
  */
@@ -66,18 +65,10 @@ function getStatusBadge(status: string): ReactElement {
 // ============================================================================
 
 /**
- * StreamCard Component - Static Snapshot Preview
+ * StreamCard Component - Static Snapshot Only
  * 
- * Shows a single JPEG snapshot that only refreshes on manual user action.
- * No auto-refresh timer, no overlays - just a simple static preview.
- * 
- * @example
- * ```
- * <StreamCard 
- *   stream={stream} 
- *   onDelete={handleDelete}
- * />
- * ```
+ * Shows ONE static JPEG snapshot. No auto-refresh timer.
+ * User clicks refresh button to manually update.
  */
 export default function StreamCard({ stream, onDelete }: StreamCardProps) {
   
@@ -85,10 +76,11 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
   // State Management
   // ============================================================================
   
-  // Cache-busting key for snapshot URL - only increments on manual refresh
   const [snapshotKey, setSnapshotKey] = useState(0)
   const [imageError, setImageError] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+
+  // NO AUTO-REFRESH TIMER - removed useEffect
 
   // ============================================================================
   // Data Preparation
@@ -103,7 +95,7 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
     day: 'numeric'
   })
 
-  // Snapshot URL with cache-busting key - using API_BASE_URL
+  // Snapshot URL with cache-busting key
   const snapshotUrl = `${API_BASE_URL}/streams/${stream.id}/snapshot?t=${snapshotKey}`
 
   // ============================================================================
@@ -117,14 +109,10 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
   }
 
   const handleRefreshSnapshot = async () => {
-    // Set loading state
     setIsRefreshing(true)
     setImageError(false)
-    
-    // Increment key to fetch new snapshot
     setSnapshotKey(prev => prev + 1)
     
-    // Clear loading state after a brief delay
     setTimeout(() => {
       setIsRefreshing(false)
     }, 500)
@@ -146,20 +134,13 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
   return (
     <Card className="flex flex-col h-full hover:shadow-lg transition-all duration-200">
       
-      {/* Header: Stream name and status */}
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <CardTitle 
-              className="text-lg truncate font-semibold" 
-              title={stream.name}
-            >
+            <CardTitle className="text-lg truncate font-semibold" title={stream.name}>
               {truncatedName}
             </CardTitle>
-            <CardDescription 
-              className="text-xs mt-1 truncate font-mono" 
-              title={maskedUrl}
-            >
+            <CardDescription className="text-xs mt-1 truncate font-mono" title={maskedUrl}>
               {displayUrl}
             </CardDescription>
           </div>
@@ -169,10 +150,8 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
         </div>
       </CardHeader>
 
-      {/* Content: Snapshot and metadata */}
       <CardContent className="flex-1 space-y-4 pb-4">
         
-        {/* Stream metadata */}
         <div className="space-y-2 text-sm">
           <div className="flex justify-between items-center">
             <span className="text-muted-foreground">Status:</span>
@@ -184,7 +163,7 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
           </div>
         </div>
 
-        {/* Static snapshot preview - no auto-refresh, no overlays */}
+        {/* Static snapshot - NO OVERLAYS */}
         <div className="relative w-full aspect-video bg-black rounded-md overflow-hidden">
           {!imageError ? (
             <>
@@ -196,7 +175,8 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
                 onLoad={handleImageLoad}
               />
               
-              {/* Manual refresh button - bottom right corner */}
+              {/* NO SCORE OVERLAY - removed */}
+              
               <Button
                 size="sm"
                 variant="ghost"
@@ -208,7 +188,6 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
                 <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
               </Button>
 
-              {/* Optional: Show loading overlay while refreshing */}
               {isRefreshing && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/20">
                   <RefreshCw className="h-8 w-8 text-white animate-spin" />
@@ -222,16 +201,11 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
                 <p className="text-sm text-muted-foreground">Snapshot unavailable</p>
                 <p className="text-xs text-muted-foreground px-4">
                   {stream.status !== 'running' 
-                    ? 'Stream must be running to capture snapshots'
-                    : 'Failed to load snapshot'}
+                    ? 'Stream must be running'
+                    : 'Failed to load'}
                 </p>
                 {stream.status === 'running' && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleRefreshSnapshot}
-                    disabled={isRefreshing}
-                  >
+                  <Button size="sm" variant="outline" onClick={handleRefreshSnapshot} disabled={isRefreshing}>
                     <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                     Retry
                   </Button>
@@ -241,43 +215,27 @@ export default function StreamCard({ stream, onDelete }: StreamCardProps) {
           )}
         </div>
 
-        {/* Action buttons */}
         <div className="flex flex-col gap-2 pt-2">
           <div className="flex gap-2">
-            {/* Play button - navigates to full screen view */}
             <Link to={`/play/${stream.id}`} className="flex-1">
-              <Button 
-                size="sm" 
-                className="w-full" 
-                variant="default"
-                title="View stream in full screen"
-              >
+              <Button size="sm" className="w-full" variant="default" title="View live stream">
                 <Play className="h-4 w-4 mr-1" />
                 Play
               </Button>
             </Link>
-
-            {/* Edit button */}
             <Link to={`/edit/${stream.id}`} className="flex-1">
-              <Button 
-                size="sm" 
-                variant="outline" 
-                className="w-full"
-                title="Edit stream settings"
-              >
+              <Button size="sm" variant="outline" className="w-full" title="Edit stream">
                 <Edit2 className="h-4 w-4 mr-1" />
                 Edit
               </Button>
             </Link>
           </div>
-
-          {/* Delete button */}
           <Button 
             size="sm" 
             variant="ghost" 
             className="w-full text-destructive hover:text-destructive hover:bg-destructive/10"
             onClick={handleDelete}
-            title="Delete this stream"
+            title="Delete stream"
           >
             <Trash2 className="h-4 w-4 mr-1" />
             Delete
