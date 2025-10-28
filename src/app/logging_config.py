@@ -97,21 +97,30 @@ def log_ffmpeg_stderr(stream_id: str, stderr_data: bytes) -> None:
 # ============================================================================
 
 class TextFormatter(logging.Formatter):
-    """Clean text formatter: timestamp | level | message | logger
+    """Clean text formatter with aligned columns.
+    
+    Format: timestamp | logger | level | message
+    
+    Logger names are padded to 40 characters for alignment.
+    Level names are padded to 8 characters.
     
     Example output:
-        2025-10-28T05:10:23.456Z | INFO | Server starting | app.main
-        2025-10-28T05:10:24.789Z | ERROR | Connection failed | app.services.streams
+        2025-10-28T05:10:23.456Z | app.main                                | INFO     | Server starting
+        2025-10-28T05:10:24.789Z | app.services.streams_service            | ERROR    | Connection failed
+        2025-10-28T05:10:25.123Z | uvicorn.access                          | INFO     | GET /health 200
     """
     
+    # Logger name column width (adjust if you have longer logger names)
+    LOGGER_WIDTH = 40
+    
     def format(self, record: logging.LogRecord) -> str:
-        """Format a log record as clean text.
+        """Format a log record as clean text with aligned columns.
         
         Args:
             record: Log record to format
             
         Returns:
-            Formatted log line: timestamp | level | message | logger
+            Formatted log line: timestamp | logger | level | message
         """
         # Get and redact the message
         message = record.getMessage()
@@ -123,8 +132,18 @@ class TextFormatter(logging.Formatter):
             tz=timezone.utc
         ).isoformat()
         
-        # Build log line
-        log_line = f"{timestamp} | {record.levelname:8s} | {message} | {record.name}"
+        # Pad logger name for alignment (truncate if too long)
+        logger_name = record.name
+        if len(logger_name) > self.LOGGER_WIDTH:
+            # Truncate long logger names with ellipsis
+            logger_name = "..." + logger_name[-(self.LOGGER_WIDTH-3):]
+        logger_padded = logger_name.ljust(self.LOGGER_WIDTH)
+        
+        # Pad level name (8 chars)
+        level_padded = record.levelname.ljust(8)
+        
+        # Build log line with aligned pipes
+        log_line = f"{timestamp} | {logger_padded} | {level_padded} | {message}"
         
         # Add exception if present
         if record.exc_info:
