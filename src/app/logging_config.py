@@ -1,6 +1,6 @@
 """Structured logging with credential redaction.
 
-Provides clean logs in format: timestamp | level | message | logger
+Provides clean logs in format: timestamp | logger | level | message
 
 Switch to JSON with: LOG_FORMAT=json
 
@@ -64,8 +64,8 @@ class TextFormatter(logging.Formatter):
     Format: timestamp | logger | level | message
     
     Example:
-        2025-10-28T05:10:23.456Z | app.main                    | INFO     | Server starting
-        2025-10-28T05:10:24.789Z | app.services.streams        | ERROR    | Failed
+        2025-10-28 07:32:03.308 | app.main                    | INFO     | Server starting
+        2025-10-28 07:32:04.789 | app.services.streams        | ERROR    | Failed
     """
     
     LOGGER_WIDTH = 40
@@ -76,8 +76,11 @@ class TextFormatter(logging.Formatter):
         # Redact message
         message = redact_credentials(record.getMessage())
         
-        # ISO 8601 UTC timestamp
-        timestamp = datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat()
+        # Get local timezone timestamp
+        # Uses system local timezone
+        dt = datetime.fromtimestamp(record.created)
+        # Format: YYYY-MM-DD HH:MM:SS.mmm
+        timestamp = dt.strftime('%Y-%m-%d %H:%M:%S.') + f'{int(dt.microsecond / 1000):03d}'
         
         # Pad logger name (truncate with ellipsis if too long)
         logger_name = record.name
@@ -103,10 +106,10 @@ class JSONFormatter(logging.Formatter):
     """JSON formatter for log aggregation systems (ELK, Splunk, CloudWatch).
     
     Produces NDJSON (newline-delimited JSON) with:
-    - timestamp: ISO 8601 UTC
+    - timestamp: Local timezone in YYYY-MM-DD HH:MM:SS.mmm format
+    - logger: Hierarchical logger name
     - level: Log level
     - message: Redacted message
-    - logger: Hierarchical logger name
     - exception: Stack trace if present
     - extra_*: Additional fields from log record
     """
@@ -115,14 +118,16 @@ class JSONFormatter(logging.Formatter):
         """Format log record as JSON."""
         message = redact_credentials(record.getMessage())
         
+        # Get local timezone timestamp
+        dt = datetime.fromtimestamp(record.created)
+        timestamp = dt.strftime('%Y-%m-%d %H:%M:%S.') + f'{int(dt.microsecond / 1000):03d}'
+        
+        # Match text formatter order: timestamp, logger, level, message
         log_data: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(
-                record.created,
-                tz=timezone.utc
-            ).isoformat(),
+            "timestamp": timestamp,
+            "logger": record.name,
             "level": record.levelname,
             "message": message,
-            "logger": record.name,
         }
         
         # Add exception

@@ -32,7 +32,7 @@ WORKDIR /app
 
 # Install universal system dependencies (no GPU-specific packages)
 # These are needed regardless of GPU vendor
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt update && apt install -y --no-install-recommends \
     # FFmpeg with all GPU backends compiled in
     ffmpeg \
     # OpenCV dependencies

@@ -1,41 +1,39 @@
-"""Health check and monitoring endpoints for service observability.
+"""Health check endpoints for service monitoring.
 
-Provides Kubernetes-compatible health check endpoints for:
-- Comprehensive health status with stream metrics
-- Liveness probe (is process running?)
-- Readiness probe (can service handle traffic?)
-- Startup probe (has service finished initialization?)
+Provides health check endpoints for:
+- Comprehensive health status with stream validation
+- Simple alive check for monitoring systems
 
 Health Status Levels:
-    - healthy: All streams operational
-    - degraded: Some streams have errors
-    - unhealthy: All streams have errors
+    - healthy: All streams operational (or no streams configured)
+    - degraded: Some streams have errors but service is functional
+    - unhealthy: Critical service failure
 
 Logging Strategy:
-    DEBUG - Probe calls, health calculations, metrics gathering
-    INFO  - Successful health checks (periodic noise in production)
-    WARN  - Degraded/unhealthy status, stream errors
-    ERROR - Health check failures, service unavailable
-
-Kubernetes Integration:
-    livenessProbe:  GET /health/live   (restart if fails)
-    readinessProbe: GET /health/ready  (remove from load balancer if fails)
-    startupProbe:   GET /health/startup (delay other probes until passes)
+    DEBUG - Health check calls, stream validation details
+    INFO  - Service initialization confirmation
+    WARN  - Degraded status, specific stream errors
+    ERROR - Health check failures, critical errors
 
 Usage:
-    # Full health check with metrics
+    # Full health check with stream validation
     >>> GET /health
     {
         "status": "healthy",
         "gpu_backend": "nvidia",
         "streams": [...],
-        "metrics": {"total": 5, "active": 3, "stopped": 2, "error": 0}
+        "metrics": {"total": 5, "active": 3, "stopped": 2, "errors": 0}
     }
+    
+    # Quick alive check
+    >>> GET /health/live
+    {"status": "alive"}
 """
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import Dict, Any, List, Literal
 import logging
 
+from ..services import container
 from ..services.streams_service import StreamsService
 from ..config_io import get_gpu_backend
 
@@ -45,7 +43,7 @@ router = APIRouter(tags=["health"])
 
 # Type aliases for better readability and type safety
 HealthStatus = Literal["healthy", "degraded", "unhealthy"]
-ProbeStatus = Literal["alive", "ready"]
+ProbeStatus = Literal["alive"]
 
 
 def get_streams_service() -> StreamsService:
@@ -56,11 +54,19 @@ def get_streams_service() -> StreamsService:
     Returns:
         StreamsService instance
         
+    Raises:
+        RuntimeError: If service not initialized (startup failed)
+        
     Logs:
         DEBUG: Service injection
     """
     logger.debug("Injecting StreamsService for health check")
-    return StreamsService()
+    
+    if container.streams_service is None:
+        logger.error("StreamsService not initialized - application startup may have failed")
+        raise RuntimeError("StreamsService not initialized")
+    
+    return container.streams_service
 
 
 def determine_acceleration_mode(stream: dict, gpu_backend: str) -> str:
@@ -98,40 +104,102 @@ def determine_acceleration_mode(stream: dict, gpu_backend: str) -> str:
     return gpu_backend
 
 
-def calculate_health_status(streams: List[dict]) -> HealthStatus:
-    """Calculate overall health status based on stream states.
+async def calculate_health_status(
+    streams: List[dict],
+    service: StreamsService
+) -> tuple[HealthStatus, List[str]]:
+    """Calculate overall health status by validating stream operational state.
+    
+    Performs deep health check by:
+    1. Verifying FFmpeg processes exist for running streams
+    2. Checking if processes are still alive
+    3. Attempting to read frames to confirm streams are working
     
     Health levels:
-    - healthy: No errors
-    - degraded: Some errors but not all
-    - unhealthy: All streams in error state
+    - healthy: All streams working (or no streams configured)
+    - degraded: Some streams have errors but service functional
+    - unhealthy: Critical service failure (reserved for future use)
     
     Args:
         streams: List of stream configurations
+        service: StreamsService instance for frame validation
         
     Returns:
-        Overall health status
+        Tuple of (overall_status, list_of_error_messages)
         
     Logs:
-        DEBUG: Health calculation details
-        WARN: Degraded or unhealthy status
+        DEBUG: Health calculation details, validation steps
+        WARN: Individual stream errors detected
     """
     if not streams:
         logger.debug("No streams configured, status: healthy")
-        return "healthy"
+        return "healthy", []
     
-    error_count = sum(1 for s in streams if s.get("status") == "error")
-    total = len(streams)
+    errors: List[str] = []
     
-    if error_count == 0:
-        logger.debug(f"All {total} stream(s) operational, status: healthy")
-        return "healthy"
-    elif error_count < total:
-        logger.warning(f"{error_count}/{total} stream(s) in error state, status: degraded")
-        return "degraded"
+    # Validate each stream that claims to be running
+    for stream in streams:
+        stream_id = stream.get("id")
+        stream_name = stream.get("name", "Unknown")
+        stream_status = stream.get("status", "stopped")
+        
+        # Skip stopped streams (intentional user action)
+        if stream_status == "stopped":
+            logger.debug(f"Stream {stream_name} ({stream_id}): stopped (intentional)")
+            continue
+        
+        # Validate running streams
+        if stream_status == "running":
+            logger.debug(f"Validating running stream: {stream_name} ({stream_id})")
+            
+            # Check 1: Verify FFmpeg process exists
+            if stream_id not in service.active_processes:
+                error_msg = f"{stream_name}: Running but no FFmpeg process found"
+                logger.warning(f"Health check failed: {error_msg}")
+                errors.append(error_msg)
+                continue
+            
+            proc_data = service.active_processes[stream_id]
+            process = proc_data.get("process")
+            
+            # Check 2: Verify process is still alive
+            if process and process.returncode is not None:
+                error_msg = f"{stream_name}: FFmpeg process died (exit code {process.returncode})"
+                logger.warning(f"Health check failed: {error_msg}")
+                errors.append(error_msg)
+                continue
+            
+            # Check 3: Verify stream is producing frames
+            try:
+                logger.debug(f"Attempting frame read for {stream_name}")
+                frame_result = await service.get_frame(stream_id)
+                
+                if frame_result is None:
+                    error_msg = f"{stream_name}: Unable to read frames (stream ended)"
+                    logger.warning(f"Health check failed: {error_msg}")
+                    errors.append(error_msg)
+                elif isinstance(frame_result, tuple) and not frame_result[0]:
+                    error_msg = f"{stream_name}: Frame extraction failed"
+                    logger.warning(f"Health check failed: {error_msg}")
+                    errors.append(error_msg)
+                else:
+                    logger.debug(f"Stream {stream_name}: frame validation passed")
+                    
+            except Exception as e:
+                error_msg = f"{stream_name}: Frame check error: {str(e)}"
+                logger.warning(f"Health check failed: {error_msg}")
+                errors.append(error_msg)
+    
+    # Determine overall status
+    if not errors:
+        logger.debug(f"All {len(streams)} stream(s) operational, status: healthy")
+        return "healthy", []
     else:
-        logger.warning(f"All {total} stream(s) in error state, status: unhealthy")
-        return "unhealthy"
+        logger.warning(
+            f"{len(errors)} stream error(s) detected, status: degraded "
+            f"({len(streams) - len(errors)}/{len(streams)} streams working)"
+        )
+        return "degraded", errors
 
 
 # ============================================================================
@@ -142,16 +210,17 @@ def calculate_health_status(streams: List[dict]) -> HealthStatus:
 async def health_check(
     service: StreamsService = Depends(get_streams_service)
 ) -> Dict[str, Any]:
-    """Comprehensive health check with stream statuses.
+    """Comprehensive health check with stream validation.
     
     Returns detailed health information including:
     - Overall service status (healthy/degraded/unhealthy)
     - Individual stream statuses and acceleration modes
     - Active and total stream counts
     - GPU backend information
+    - Specific error messages if degraded
     
-    This is the primary health check endpoint for monitoring.
-    Use for comprehensive service health assessment.
+    This endpoint performs deep validation by actually attempting to read
+    frames from running streams to confirm they're operational.
     
     Returns:
         Health status dictionary with full metrics
@@ -159,7 +228,7 @@ async def health_check(
     Raises:
         HTTPException 503: Critical service failure
         
-    Example Response:
+    Example Response (Healthy):
         {
             "status": "healthy",
             "gpu_backend": "nvidia",
@@ -175,22 +244,42 @@ async def health_check(
                 "total": 5,
                 "active": 3,
                 "stopped": 2,
-                "error": 0
+                "errors": 0
             }
         }
         
+    Example Response (Degraded):
+        {
+            "status": "degraded",
+            "gpu_backend": "nvidia",
+            "streams": [...],
+            "metrics": {
+                "total": 5,
+                "active": 3,
+                "stopped": 1,
+                "errors": 1
+            },
+            "errors": [
+                "Camera 2: FFmpeg process died (exit code 1)"
+            ]
+        }
+        
     Logs:
-        DEBUG: Health check invocation and metrics
-        WARN: Degraded or unhealthy status
-        ERROR: Health check failures
+        DEBUG: Health check invocation, stream validation details
+        WARN: Degraded status with error details
+        ERROR: Health check failures, exceptions
     """
     try:
         logger.debug("Processing comprehensive health check")
         
+        # Gather stream configurations
         streams = await service.list_streams()
         gpu_backend = get_gpu_backend()
         
-        logger.debug(f"Retrieved {len(streams)} stream(s) for health check")
+        logger.debug(f"Retrieved {len(streams)} stream(s) for health validation")
+        
+        # Calculate actual health by validating stream operation
+        overall_status, error_messages = await calculate_health_status(streams, service)
         
         # Build detailed stream information
         stream_details: List[Dict[str, str]] = [
@@ -204,11 +293,10 @@ async def health_check(
         ]
         
         # Calculate metrics
-        overall_status = calculate_health_status(streams)
         active_count = sum(1 for s in streams if s.get("status") == "running")
-        error_count = sum(1 for s in streams if s.get("status") == "error")
-        stopped_count = len(streams) - active_count - error_count
+        stopped_count = sum(1 for s in streams if s.get("status") == "stopped")
         
+        # Build response
         response = {
             "status": overall_status,
             "gpu_backend": gpu_backend,
@@ -217,20 +305,31 @@ async def health_check(
                 "total": len(streams),
                 "active": active_count,
                 "stopped": stopped_count,
-                "error": error_count
+                "errors": len(error_messages)
             }
         }
         
-        # Log non-healthy status as warning
-        if overall_status != "healthy":
+        # Add error details if present
+        if error_messages:
+            response["errors"] = error_messages
+        
+        # Log health status
+        if overall_status == "degraded":
             logger.warning(
-                f"Health check: {overall_status} status - "
-                f"{error_count} errors, {active_count}/{len(streams)} active"
+                f"Health check: {overall_status} - {len(error_messages)} error(s), "
+                f"{active_count}/{len(streams)} streams active"
             )
+            # Log each specific error
+            for error in error_messages:
+                logger.warning(f"  - {error}")
+                
+        elif overall_status == "unhealthy":
+            logger.error(f"Health check: {overall_status} - Service not functional")
+            
         else:
             logger.debug(
                 f"Health check: {overall_status} - "
-                f"{active_count}/{len(streams)} active, {error_count} errors"
+                f"{active_count}/{len(streams)} streams active, {len(error_messages)} errors"
             )
         
         return response
@@ -244,136 +343,27 @@ async def health_check(
 
 
 @router.get("/health/live", status_code=status.HTTP_200_OK)
-async def liveness_probe() -> Dict[str, ProbeStatus]:
-    """Kubernetes liveness probe.
+async def liveness_check() -> Dict[str, ProbeStatus]:
+    """Simple liveness check for monitoring systems.
     
-    Simple endpoint that returns immediately to verify the service process
-    is running and responsive. Does not check dependencies or functionality.
-    
-    Kubernetes uses this to restart unhealthy pods. Failures indicate the
-    process is deadlocked or crashed.
+    Returns immediately to verify the service process is running and
+    responsive. Does not check dependencies or stream functionality.
     
     Use this for:
-    - Kubernetes livenessProbe configuration
-    - Basic "is alive" checks
-    - High-frequency health monitoring (low overhead)
+    - Docker healthcheck directive
+    - Uptime monitoring (Uptime Kuma, Pingdom, etc.)
+    - Load balancer health checks
+    - High-frequency monitoring (low overhead)
     
     Returns:
         Liveness status (always {"status": "alive"})
         
     Logs:
-        DEBUG: Liveness probe calls
+        DEBUG: Liveness check calls
     """
-    logger.debug("Liveness probe called")
+    logger.debug("Liveness check called")
     return {"status": "alive"}
 
 
-@router.get("/health/ready", status_code=status.HTTP_200_OK)
-async def readiness_probe(
-    service: StreamsService = Depends(get_streams_service)
-) -> Dict[str, Any]:
-    """Kubernetes readiness probe.
-    
-    Verifies the service and its dependencies are ready to handle requests.
-    Checks that the service can successfully query stream configurations.
-    
-    Kubernetes uses this to control traffic routing. Failed probes remove
-    the pod from the service's load balancer.
-    
-    Use this for:
-    - Kubernetes readinessProbe configuration
-    - Load balancer health checks
-    - Dependency validation
-    
-    Returns:
-        Readiness status with basic metrics
-        
-    Raises:
-        HTTPException 503: Service not ready
-        
-    Example Response:
-        {
-            "status": "ready",
-            "gpu_backend": "nvidia",
-            "total_streams": 5
-        }
-        
-    Logs:
-        DEBUG: Readiness checks and results
-        ERROR: Readiness failures
-    """
-    try:
-        logger.debug("Processing readiness probe")
-        
-        # Verify service can query streams (tests config loading)
-        streams = await service.list_streams()
-        gpu_backend = get_gpu_backend()
-        
-        logger.debug(
-            f"Readiness check passed: {len(streams)} stream(s), "
-            f"GPU backend: {gpu_backend}"
-        )
-        
-        return {
-            "status": "ready",
-            "gpu_backend": gpu_backend,
-            "total_streams": len(streams)
-        }
-        
-    except Exception as e:
-        logger.error(f"Readiness check failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not ready"
-        )
-
-
-@router.get("/health/startup", status_code=status.HTTP_200_OK)
-async def startup_probe(
-    service: StreamsService = Depends(get_streams_service)
-) -> Dict[str, ProbeStatus]:
-    """Kubernetes startup probe.
-    
-    Used during container initialization to determine when the application
-    has started successfully. Similar to readiness but with more lenient
-    timeout expectations.
-    
-    Kubernetes delays liveness/readiness probes until this passes, allowing
-    for slow application startup without premature restarts.
-    
-    Use this for:
-    - Kubernetes startupProbe configuration
-    - Initial service availability checks
-    - Applications with slow startup times
-    
-    Returns:
-        Startup status ({"status": "ready"})
-        
-    Raises:
-        HTTPException 503: Service not started
-        
-    Logs:
-        DEBUG: Startup checks
-        INFO: Successful startup completion
-        ERROR: Startup failures
-    """
-    try:
-        logger.debug("Processing startup probe")
-        
-        # Basic initialization check (can query config)
-        streams = await service.list_streams()
-        
-        logger.info(f"Startup check passed: service initialized with {len(streams)} stream(s)")
-        
-        return {"status": "ready"}
-        
-    except Exception as e:
-        logger.error(f"Startup check failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not started"
-        )
-
-
 # Log health check router initialization
-logger.debug("Health check endpoints registered")
+logger.debug("Health check endpoints registered: /health, /health/live")
