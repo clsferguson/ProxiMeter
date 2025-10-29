@@ -108,6 +108,7 @@ models/*.onnx
 .specify/
 .claude/
 artifacts/
+specs/
 .github/prompts/
 .github/copilot-instructions.md
 
