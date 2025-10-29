@@ -4,47 +4,35 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
 develop-eggs/
-dist/
-downloads/
 eggs/
-.eggs/
 lib/
 lib64/
 parts/
 sdist/
 var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
 .installed.cfg
-*.egg
 MANIFEST
 
-
-# Virtual environments
+# Virtual Environments
 .venv/
 venv/
 env/
 ENV/
 
-
-# Packaging and build
+# Packaging & Build Artifacts
 build/
 dist/
 .eggs/
 *.egg-info/
 *.egg
 wheels/
-MANIFEST
+share/python-wheels/
 pip-wheel-metadata/
 pip-log.txt
 pip-delete-this-directory.txt
 
-
-# Testing & type checking
+# Testing & Type Checking
 .pytest_cache/
 .coverage
 .coverage.*
@@ -55,18 +43,12 @@ pip-delete-this-directory.txt
 .tox/
 .nox/
 
-
 # Jupyter
 .ipynb_checkpoints/
 
-
-# Logs
-logs/
-*.log
-
-
-# IDE/editor
+# IDE & Editors
 .vscode/
+!.vscode/extensions.json
 .idea/
 *.suo
 *.ntvs*
@@ -74,37 +56,41 @@ logs/
 *.sln
 *.sw?
 *.orig
+.prettierignore
 
-
-# OS files
+# OS Files
 .DS_Store
 Thumbs.db
 desktop.ini
 
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Environment/config
+# Environment & Config
 .env
 .env.*
 !.env.example
-# User config overrides (template config/config.yml is tracked)
 config/config.local.yml
 config/config.prod.yml
 
-
-# Docker & runtime
+# Docker & Runtime
 .docker/
 docker-compose.override.yml
 .tmp/
 tmp/
 
-
-# ML/AI artifacts (downloaded models, not source code)
+# ML/AI Artifacts
 wandb/
 lightning_logs/
 outputs/
 runs/
 checkpoints/
-# Only ignore downloaded model files, not Python model definitions
 *.pt
 *.pth
 *.onnx
@@ -115,12 +101,17 @@ checkpoints/
 models/*.pt
 models/*.pth
 models/*.onnx
-!src/**/models/  # Never ignore source code models/ directories
-# implementation reports
+!src/**/models/
 .impreports/
 
-# AI agents
+# AI Agents
+.specify/
 .claude/
+artifacts/
+.github/prompts/
+.github/copilot-instructions.md
 
-# Node (if present in UI tooling)
+# Node/Frontend
 node_modules/
+dist-ssr
+*.local
