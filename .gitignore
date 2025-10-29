@@ -119,6 +119,8 @@ models/*.onnx
 # implementation reports
 .impreports/
 
+# AI agents
+.claude/
 
 # Node (if present in UI tooling)
 node_modules/
