@@ -10,6 +10,15 @@ services:
       - APP_PORT=${APP_PORT:-8000}
       - YOLO_MODEL=${YOLO_MODEL:-yolo11n}
       - YOLO_IMAGE_SIZE=${YOLO_IMAGE_SIZE:-320}
+
+      # ===================================================================
+      # CPU-Specific Tuning (Uncomment if needed for your hardware)
+      # ===================================================================
+      # Suppress PyTorch NNPACK warnings on older CPUs (Intel Xeon E5-v2, etc.)
+      # - OMP_NUM_THREADS=4                    # Limit OpenMP threads
+      # - MKL_NUM_THREADS=4                     # Limit Intel MKL threads
+      # - ONEDNN_MAX_CPU_ISA=AVX                # Limit to AVX instructions (for older CPUs)
+      # - TORCH_LOG_LEVEL=ERROR                 # Suppress PyTorch warnings (doesn't affect C++ warnings)
     volumes:
       - proximeter_config:/app/config
       - proximeter_yolo_models:/app/models

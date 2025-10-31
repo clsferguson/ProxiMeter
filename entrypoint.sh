@@ -29,11 +29,6 @@ MODEL_DIR="/app/models"
 MODEL_PT="${MODEL_DIR}/${YOLO_MODEL}.pt"
 MODEL_ONNX="${MODEL_DIR}/${YOLO_MODEL}_${YOLO_IMAGE_SIZE}.onnx"
 
-# Set YOLO config directory to avoid /root/.config warnings
-export YOLO_CONFIG_DIR="/app/config/yolo"
-mkdir -p "${YOLO_CONFIG_DIR}"
-chown appuser:appuser "${YOLO_CONFIG_DIR}"
-
 echo ""
 echo "🤖 Initializing YOLO Model..."
 echo "   Model: ${YOLO_MODEL}"
@@ -72,6 +67,7 @@ else
 import sys
 from pathlib import Path
 from ultralytics import YOLO
+import shutil
 
 try:
     # Download model
@@ -82,12 +78,13 @@ try:
     print('   ⏳ Exporting to ONNX format...')
     model.export(format='onnx', imgsz=${YOLO_IMAGE_SIZE}, simplify=True, dynamic=False)
 
-    # Move ONNX file to model directory
+    # Copy ONNX file to model directory (handles cross-device links)
     source_onnx = Path('${YOLO_MODEL}.onnx')
     target_onnx = Path('${MODEL_ONNX}')
 
     if source_onnx.exists():
-        source_onnx.rename(target_onnx)
+        shutil.copy2(str(source_onnx), str(target_onnx))
+        source_onnx.unlink()  # Remove source after copy
         print(f'   ✅ Model exported: {target_onnx}')
         print(f'   📦 Model size: {target_onnx.stat().st_size / (1024*1024):.1f} MB')
     else:

@@ -31,7 +31,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     APP_PORT=8000 \
     NVIDIA_DRIVER_CAPABILITIES="compute,video,utility" \
-    TORCH_LOG_LEVEL=ERROR
+    YOLO_CONFIG_DIR=/app/config/yolo
 
 WORKDIR /app
 
@@ -68,7 +68,7 @@ COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Setup directories with correct permissions
-RUN mkdir -p /app/config /app/models && chown -R appuser:appuser /app
+RUN mkdir -p /app/config /app/models /app/config/yolo && chown -R appuser:appuser /app
 RUN mkdir -p /app/src/app/static/frontend
 ENV STATIC_ROOT=/app/src/app/static/frontend
 

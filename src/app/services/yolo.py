@@ -111,7 +111,7 @@ def export_to_onnx(
         )
 
         # Ultralytics exports to current working directory with name model_name.onnx
-        # We need to move to model_dir with image size in name
+        # We need to copy to model_dir with image size in name
         import shutil
         import os
 
@@ -119,18 +119,21 @@ def export_to_onnx(
         cwd_onnx = Path.cwd() / f"{model_name}.onnx"
         exported_onnx = model_dir_path / f"{model_name}.onnx"
 
+        source_file = None
         if cwd_onnx.exists() and cwd_onnx != model_onnx:
-            # Move from current working directory to model directory
-            shutil.move(str(cwd_onnx), str(model_onnx))
-            print(f"✅ ONNX export complete: {model_onnx}")
-            print(f"📦 Model size: {model_onnx.stat().st_size / (1024*1024):.1f} MB")
+            source_file = cwd_onnx
         elif exported_onnx.exists() and exported_onnx != model_onnx:
-            # Move from model directory (same name) to model directory with size
-            shutil.move(str(exported_onnx), str(model_onnx))
-            print(f"✅ ONNX export complete: {model_onnx}")
-            print(f"📦 Model size: {model_onnx.stat().st_size / (1024*1024):.1f} MB")
+            source_file = exported_onnx
         elif model_onnx.exists():
             # Already at target location
+            print(f"✅ ONNX export complete: {model_onnx}")
+            print(f"📦 Model size: {model_onnx.stat().st_size / (1024*1024):.1f} MB")
+            return model_onnx
+
+        if source_file:
+            # Use copy + remove instead of move to handle cross-device links
+            shutil.copy2(str(source_file), str(model_onnx))
+            source_file.unlink()  # Remove source after successful copy
             print(f"✅ ONNX export complete: {model_onnx}")
             print(f"📦 Model size: {model_onnx.stat().st_size / (1024*1024):.1f} MB")
         else:
