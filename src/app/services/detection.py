@@ -109,26 +109,37 @@ def parse_detections(
     top, left = padding
     orig_h, orig_w = original_shape
 
-    # YOLO11 output format: (batch, num_detections, 85)
-    # 85 = [x_center, y_center, width, height, objectness, class_0_prob, ..., class_79_prob]
+    # YOLO11 output format: (batch, 84, num_detections)
+    # 84 = [x_center, y_center, width, height, class_0_prob, ..., class_79_prob]
+    # Note: YOLO11 removed the objectness score - only class probabilities remain
+
+    # Remove batch dimension if present
     if len(outputs.shape) == 3:
-        outputs = outputs[0]  # Remove batch dimension
+        outputs = outputs[0]  # Shape becomes (84, num_detections)
+
+    # Transpose to (num_detections, 84) for easier iteration
+    outputs = outputs.T
 
     for detection in outputs:
-        if len(detection) < 85:
+        if len(detection) < 84:
             continue
 
-        # Extract coordinates
+        # Extract coordinates (first 4 values)
         x_center, y_center, width, height = detection[:4]
-        objectness = detection[4]
-        class_probs = detection[5:]
+
+        # Extract class probabilities (remaining 80 values)
+        class_probs = detection[4:]
 
         # Get class with highest probability
         class_id = int(np.argmax(class_probs))
-        class_prob = class_probs[class_id]
-        confidence = objectness * class_prob
+        confidence = float(class_probs[class_id])
+
+        # Filter low-confidence detections early (before coordinate conversion)
+        if confidence < 0.01:  # Skip very low confidence detections
+            continue
 
         # Convert to bounding box coordinates (x1, y1, x2, y2)
+        # Remove padding and scale back to original size
         x1 = int((x_center - width / 2 - left) / scale)
         y1 = int((y_center - height / 2 - top) / scale)
         x2 = int((x_center + width / 2 - left) / scale)
@@ -147,7 +158,7 @@ def parse_detections(
         detections.append(Detection(
             class_id=class_id,
             class_name=COCO_CLASSES[class_id],
-            confidence=float(confidence),
+            confidence=confidence,
             bbox=(x1, y1, x2, y2)
         ))
 

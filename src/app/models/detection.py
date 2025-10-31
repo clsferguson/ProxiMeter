@@ -127,10 +127,10 @@ class StreamDetectionConfig(BaseModel):
     )
 
     enabled_labels: List[str] = Field(
-        default=["person"],
+        default_factory=lambda: ["person"],
         description="COCO class names to detect and display",
-        min_length=0,
-        max_length=80
+        min_items=0,
+        max_items=80
     )
 
     min_confidence: float = Field(

@@ -42,15 +42,26 @@ def load_yolo_model(model_name: str, model_dir: str = "/app/models") -> Path:
 
     try:
         print(f"📥 Downloading {model_name}.pt...")
+        # YOLO() auto-downloads model to ~/.ultralytics/models
+        # We pass the target path to export later, but the .pt file stays in default location
         model = YOLO(f"{model_name}.pt")
-        # Model auto-downloads to ~/.ultralytics by default
-        # We need to move it to our cache directory
+
+        # Check if model was downloaded to default location
         default_model = Path.home() / ".ultralytics" / "models" / f"{model_name}.pt"
         if default_model.exists():
+            # Create symlink or copy to our cache directory for consistency
             import shutil
-            shutil.move(str(default_model), str(model_pt))
+            if not model_pt.exists():
+                shutil.copy2(str(default_model), str(model_pt))
             print(f"✅ Model downloaded and cached: {model_pt}")
-        return model_pt
+            return model_pt
+
+        # If not in default location, model might already be at target
+        if model_pt.exists():
+            print(f"✅ Model found at: {model_pt}")
+            return model_pt
+
+        raise FileNotFoundError(f"Model download succeeded but file not found at expected locations")
     except Exception as e:
         raise RuntimeError(f"Failed to download YOLO model {model_name}: {e}")
 

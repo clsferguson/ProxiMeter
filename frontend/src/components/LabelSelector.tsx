@@ -97,7 +97,7 @@ export function LabelSelector({ selectedLabels, onChange, className }: LabelSele
                   <Checkbox
                     id={`label-${label}`}
                     checked={selectedLabels.includes(label)}
-                    onCheckedChange={(checked) => handleToggle(label, checked as boolean)}
+                    onCheckedChange={(checked: boolean | "indeterminate") => handleToggle(label, checked as boolean)}
                   />
                   <Label
                     htmlFor={`label-${label}`}

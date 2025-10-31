@@ -195,16 +195,20 @@ async def update_stream_detection_config(stream_id: str, detection_config: Strea
         save_streams(config)
 
         # Apply changes immediately to running stream (if active)
+        applied_immediately = False
         if container.streams_service:
-            active_processes = container.streams_service.active_processes
-            if stream_id in active_processes:
-                active_processes[stream_id]["detection_config"] = detection_config.model_dump()
-                logger.info(f"Detection config updated live for stream {stream_id}")
+            # Use lock to prevent race conditions when updating active_processes
+            async with container.streams_service.active_processes_lock:
+                active_processes = container.streams_service.active_processes
+                if stream_id in active_processes:
+                    active_processes[stream_id]["detection_config"] = detection_config.model_dump()
+                    applied_immediately = True
+                    logger.info(f"Detection config updated live for stream {stream_id}")
 
         return {
             "success": True,
             "message": f"Detection config updated for stream {stream_id}",
-            "applied_immediately": stream_id in (container.streams_service.active_processes if container.streams_service else {})
+            "applied_immediately": applied_immediately
         }
     except HTTPException:
         raise

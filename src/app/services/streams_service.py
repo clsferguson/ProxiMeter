@@ -81,13 +81,14 @@ class StreamsService:
     
     def __init__(self) -> None:
         """Initialize service and detect GPU backend.
-        
+
         Note: Does not raise if GPU unavailable - individual stream starts
         will fail with clear error messages.
         """
         self.active_processes: dict[str, dict[str, Any]] = {}
+        self.active_processes_lock = asyncio.Lock()
         self.gpu_backend = get_gpu_backend()
-        
+
         if self.gpu_backend == "none":
             logger.warning("No GPU detected - stream starts will fail")
         else:

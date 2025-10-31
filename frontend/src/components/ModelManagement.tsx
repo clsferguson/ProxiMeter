@@ -5,7 +5,6 @@
  * Displays cached YOLO models with ability to delete unused models
  */
 
-import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { listCachedModels, deleteCachedModel, type CachedModel } from '@/services/detection';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -36,7 +35,6 @@ import { toast } from 'sonner';
 
 export function ModelManagement() {
   const [models, setModels] = useState<CachedModel[]>([]);
-  const [activeModel, setActiveModel] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -49,7 +47,6 @@ export function ModelManagement() {
       setError(null);
       const data = await listCachedModels();
       setModels(data.models);
-      setActiveModel(data.active_model);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load models';
       setError(errorMessage);
