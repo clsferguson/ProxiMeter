@@ -16,7 +16,93 @@ echo "FastAPI: $(python -c 'import fastapi; print(fastapi.__version__)' 2>/dev/n
 echo "Uvicorn: $(python -c 'import uvicorn; print(uvicorn.__version__)' 2>/dev/null || echo 'N/A')"
 echo "Pydantic: $(python -c 'import pydantic; print(pydantic.__version__)' 2>/dev/null || echo 'N/A')"
 echo "FFmpeg: $(ffmpeg -version 2>/dev/null | head -1 || echo 'N/A')"
+echo "Ultralytics: $(python -c 'import ultralytics; print(ultralytics.__version__)' 2>/dev/null || echo 'N/A')"
+echo "ONNX Runtime: $(python -c 'import onnxruntime; print(onnxruntime.__version__)' 2>/dev/null || echo 'N/A')"
 echo "==============================="
+
+# ============================================================================
+# YOLO Model Initialization
+# ============================================================================
+YOLO_MODEL="${YOLO_MODEL:-yolo11n}"
+YOLO_IMAGE_SIZE="${YOLO_IMAGE_SIZE:-640}"
+MODEL_DIR="/app/models"
+MODEL_PT="${MODEL_DIR}/${YOLO_MODEL}.pt"
+MODEL_ONNX="${MODEL_DIR}/${YOLO_MODEL}_${YOLO_IMAGE_SIZE}.onnx"
+
+echo ""
+echo "🤖 Initializing YOLO Model..."
+echo "   Model: ${YOLO_MODEL}"
+echo "   Image Size: ${YOLO_IMAGE_SIZE}x${YOLO_IMAGE_SIZE}"
+
+# Validate YOLO_MODEL
+VALID_MODELS="yolo11n yolo11s yolo11m yolo11l yolo11x yolov9t yolov9s yolov9m yolov9l yolov8n yolov8s yolov8m yolov8l yolov8x yolov7 yolov7x yolov6n yolov6s yolov6m yolov6l"
+if ! echo "$VALID_MODELS" | grep -qw "$YOLO_MODEL"; then
+    echo "   ❌ ERROR: Invalid YOLO_MODEL='${YOLO_MODEL}'"
+    echo "   Valid options: ${VALID_MODELS}"
+    exit 1
+fi
+
+# Validate YOLO_IMAGE_SIZE
+VALID_SIZES="320 416 512 640 1280"
+if ! echo "$VALID_SIZES" | grep -qw "$YOLO_IMAGE_SIZE"; then
+    echo "   ❌ ERROR: Invalid YOLO_IMAGE_SIZE='${YOLO_IMAGE_SIZE}'"
+    echo "   Valid options: ${VALID_SIZES}"
+    exit 1
+fi
+
+# Create model directory if it doesn't exist
+mkdir -p "${MODEL_DIR}"
+chown appuser:appuser "${MODEL_DIR}"
+
+# Check if ONNX model already exists
+if [ -f "${MODEL_ONNX}" ]; then
+    echo "   ✅ ONNX model already cached: ${MODEL_ONNX}"
+    MODEL_SIZE=$(du -h "${MODEL_ONNX}" | cut -f1)
+    echo "   📦 Model size: ${MODEL_SIZE}"
+else
+    echo "   📥 Downloading YOLO model (first run, may take 30-60 seconds)..."
+
+    # Download and export model using Python
+    python -c "
+import sys
+from pathlib import Path
+from ultralytics import YOLO
+
+try:
+    # Download model
+    print('   ⏳ Downloading ${YOLO_MODEL}.pt...')
+    model = YOLO('${YOLO_MODEL}.pt')
+
+    # Export to ONNX
+    print('   ⏳ Exporting to ONNX format...')
+    model.export(format='onnx', imgsz=${YOLO_IMAGE_SIZE}, simplify=True, dynamic=False)
+
+    # Move ONNX file to model directory
+    source_onnx = Path('${YOLO_MODEL}.onnx')
+    target_onnx = Path('${MODEL_ONNX}')
+
+    if source_onnx.exists():
+        source_onnx.rename(target_onnx)
+        print(f'   ✅ Model exported: {target_onnx}')
+        print(f'   📦 Model size: {target_onnx.stat().st_size / (1024*1024):.1f} MB')
+    else:
+        print('   ❌ ERROR: ONNX export failed - file not found')
+        sys.exit(1)
+
+except Exception as e:
+    print(f'   ❌ ERROR: Model initialization failed: {e}')
+    sys.exit(1)
+" 2>&1
+
+    if [ $? -ne 0 ]; then
+        echo "   ❌ ERROR: Failed to download or export YOLO model"
+        echo "   Please check internet connectivity and try again"
+        exit 1
+    fi
+fi
+
+echo "   ✅ YOLO model ready: ${YOLO_MODEL}_${YOLO_IMAGE_SIZE}.onnx"
+echo ""
 
 # ============================================================================
 # GPU Detection (Runtime) - GPU-specific, must run as root
