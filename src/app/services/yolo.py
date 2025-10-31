@@ -110,15 +110,31 @@ def export_to_onnx(
             dynamic=dynamic
         )
 
-        # Ultralytics exports to same directory as .pt file with name model_name.onnx
-        # We need to rename to include image size
+        # Ultralytics exports to current working directory with name model_name.onnx
+        # We need to move to model_dir with image size in name
+        import shutil
+        import os
+
+        # Check current directory first (where export happens)
+        cwd_onnx = Path.cwd() / f"{model_name}.onnx"
         exported_onnx = model_dir_path / f"{model_name}.onnx"
-        if exported_onnx.exists():
-            exported_onnx.rename(model_onnx)
+
+        if cwd_onnx.exists() and cwd_onnx != model_onnx:
+            # Move from current working directory to model directory
+            shutil.move(str(cwd_onnx), str(model_onnx))
+            print(f"✅ ONNX export complete: {model_onnx}")
+            print(f"📦 Model size: {model_onnx.stat().st_size / (1024*1024):.1f} MB")
+        elif exported_onnx.exists() and exported_onnx != model_onnx:
+            # Move from model directory (same name) to model directory with size
+            shutil.move(str(exported_onnx), str(model_onnx))
+            print(f"✅ ONNX export complete: {model_onnx}")
+            print(f"📦 Model size: {model_onnx.stat().st_size / (1024*1024):.1f} MB")
+        elif model_onnx.exists():
+            # Already at target location
             print(f"✅ ONNX export complete: {model_onnx}")
             print(f"📦 Model size: {model_onnx.stat().st_size / (1024*1024):.1f} MB")
         else:
-            raise RuntimeError(f"ONNX export succeeded but file not found: {exported_onnx}")
+            raise RuntimeError(f"ONNX export succeeded but file not found at {cwd_onnx} or {exported_onnx}")
 
         return model_onnx
     except Exception as e:

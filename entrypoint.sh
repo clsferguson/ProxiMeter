@@ -29,6 +29,11 @@ MODEL_DIR="/app/models"
 MODEL_PT="${MODEL_DIR}/${YOLO_MODEL}.pt"
 MODEL_ONNX="${MODEL_DIR}/${YOLO_MODEL}_${YOLO_IMAGE_SIZE}.onnx"
 
+# Set YOLO config directory to avoid /root/.config warnings
+export YOLO_CONFIG_DIR="/app/config/yolo"
+mkdir -p "${YOLO_CONFIG_DIR}"
+chown appuser:appuser "${YOLO_CONFIG_DIR}"
+
 echo ""
 echo "🤖 Initializing YOLO Model..."
 echo "   Model: ${YOLO_MODEL}"

@@ -1,6 +1,5 @@
 services:
   proximeter:
-    profiles: ["cpu", "gpu"]
     image: ghcr.io/clsferguson/proximeter:latest
     container_name: ProxiMeter
     restart: unless-stopped
@@ -10,10 +9,10 @@ services:
     environment:
       - APP_PORT=${APP_PORT:-8000}
       - YOLO_MODEL=${YOLO_MODEL:-yolo11n}
-      - YOLO_IMAGE_SIZE=${YOLO_IMAGE_SIZE:-640}
+      - YOLO_IMAGE_SIZE=${YOLO_IMAGE_SIZE:-320}
     volumes:
       - proximeter_config:/app/config
-      - yolo-models:/app/models
+      - proximeter_yolo_models:/app/models
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
       interval: 30s
@@ -22,4 +21,4 @@ services:
 
 volumes:
   proximeter_config:
-  yolo-models:
+  proximeter_yolo_models:
