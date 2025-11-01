@@ -50,9 +50,20 @@ if ! echo "$VALID_SIZES" | grep -qw "$YOLO_IMAGE_SIZE"; then
     exit 1
 fi
 
-# Create model directory if it doesn't exist
+# Create model and config directories with proper permissions
 mkdir -p "${MODEL_DIR}"
 chown appuser:appuser "${MODEL_DIR}"
+
+# Create Ultralytics config directory to avoid permission errors
+# Ultralytics tries to write settings.json and persistent_cache.json here
+YOLO_CONFIG_DIR="${YOLO_CONFIG_DIR:-/app/config/yolo}"
+mkdir -p "${YOLO_CONFIG_DIR}/Ultralytics"
+chown -R appuser:appuser "${YOLO_CONFIG_DIR}"
+export YOLO_CONFIG_DIR
+
+echo "📁 Config directories:"
+echo "   Models: ${MODEL_DIR}"
+echo "   YOLO Config: ${YOLO_CONFIG_DIR}"
 
 # Check if ONNX model already exists
 if [ -f "${MODEL_ONNX}" ]; then
@@ -65,7 +76,15 @@ else
     # Download and export model using Python
     python -c "
 import sys
+import os
+import warnings
 from pathlib import Path
+
+# Suppress warnings before importing ultralytics
+os.environ['YOLO_VERBOSE'] = 'False'
+warnings.filterwarnings('ignore', category=UserWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
+
 from ultralytics import YOLO
 import shutil
 

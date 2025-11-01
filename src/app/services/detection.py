@@ -14,7 +14,10 @@ import numpy as np
 import cv2
 from typing import List, Tuple
 import onnxruntime as ort
+import logging
 from app.models.detection import Detection, COCO_CLASSES
+
+logger = logging.getLogger(__name__)
 
 
 # Pre-generated class colors (80 COCO classes, fixed seed for consistency)
@@ -46,9 +49,11 @@ def preprocess_frame(
         - scale_factor: Resize scale applied
         - padding: (top, left) padding in pixels
     """
+    logger.debug(f"Preprocessing frame: input_shape={frame_bgr.shape}, target_size={target_size}")
     h, w = frame_bgr.shape[:2]
     scale = min(target_size / h, target_size / w)
     new_h, new_w = int(h * scale), int(w * scale)
+    logger.debug(f"Resize params: original=({w}x{h}), scaled=({new_w}x{new_h}), scale={scale:.3f}")
 
     # Letterbox resize
     resized = cv2.resize(frame_bgr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
@@ -65,6 +70,7 @@ def preprocess_frame(
     normalized = chw.astype(np.float32) / 255.0
     batch = np.expand_dims(normalized, axis=0)
 
+    logger.debug(f"Preprocessing complete: output_shape={batch.shape}, padding=({top},{left})")
     return batch, scale, (top, left)
 
 
@@ -82,8 +88,15 @@ def run_inference(
     Returns:
         Raw YOLO output array (detections before NMS)
     """
+    import time
     input_name = session.get_inputs()[0].name
+    logger.debug(f"Running YOLO inference: input_name={input_name}, input_shape={preprocessed_frame.shape}")
+
+    start_time = time.perf_counter()
     outputs = session.run(None, {input_name: preprocessed_frame})
+    inference_time_ms = (time.perf_counter() - start_time) * 1000
+
+    logger.info(f"YOLO inference complete: time={inference_time_ms:.1f}ms, output_shape={outputs[0].shape}")
     return outputs[0]
 
 
@@ -105,6 +118,7 @@ def parse_detections(
     Returns:
         List of Detection objects with bounding boxes in original frame coordinates
     """
+    logger.debug(f"Parsing detections: output_shape={outputs.shape}, scale={scale:.3f}, padding={padding}, original_shape={original_shape}")
     detections = []
     top, left = padding
     orig_h, orig_w = original_shape
@@ -116,9 +130,11 @@ def parse_detections(
     # Remove batch dimension if present
     if len(outputs.shape) == 3:
         outputs = outputs[0]  # Shape becomes (84, num_detections)
+        logger.debug(f"Removed batch dimension: new_shape={outputs.shape}")
 
     # Transpose to (num_detections, 84) for easier iteration
     outputs = outputs.T
+    logger.debug(f"Transposed to (num_detections, 84): shape={outputs.shape}")
 
     for detection in outputs:
         if len(detection) < 84:
@@ -162,6 +178,7 @@ def parse_detections(
             bbox=(x1, y1, x2, y2)
         ))
 
+    logger.info(f"Parsed {len(detections)} raw detections from {outputs.shape[0]} candidates")
     return detections
 
 
@@ -181,10 +198,22 @@ def filter_detections(
     Returns:
         Filtered list of Detection objects
     """
-    return [
+    logger.debug(f"Filtering detections: input_count={len(detections)}, enabled_labels={enabled_labels}, min_confidence={min_confidence}")
+
+    filtered = [
         det for det in detections
         if det.class_name in enabled_labels and det.confidence >= min_confidence
     ]
+
+    if filtered:
+        class_counts = {}
+        for det in filtered:
+            class_counts[det.class_name] = class_counts.get(det.class_name, 0) + 1
+        logger.info(f"Filtered to {len(filtered)} detections: {class_counts}")
+    else:
+        logger.debug("No detections after filtering")
+
+    return filtered
 
 
 def render_bounding_boxes(
@@ -201,6 +230,7 @@ def render_bounding_boxes(
     Returns:
         Frame with rendered bounding boxes (same as input, modified in-place)
     """
+    logger.debug(f"Rendering {len(detections)} bounding boxes on frame")
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = 0.6
     font_thickness = 2

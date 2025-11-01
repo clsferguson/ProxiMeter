@@ -431,6 +431,12 @@ class StreamsService:
             
             # Check if detection is enabled for this stream
             detection_enabled = stream.get("detection", {}).get("enabled", False)
+            detection_config = stream.get("detection", {})
+
+            if detection_enabled:
+                logger.info(f"[{stream_id}] Detection enabled: labels={detection_config.get('enabled_labels', ['person'])}, min_conf={detection_config.get('min_confidence', 0.7)}")
+            else:
+                logger.debug(f"[{stream_id}] Detection disabled")
 
             # Build command
             cmd = build_ffmpeg_command(
@@ -466,12 +472,13 @@ class StreamsService:
             # Get stream dimensions if detection enabled
             if detection_enabled:
                 try:
+                    logger.debug(f"[{stream_id}] Probing stream dimensions for detection...")
                     dimensions = await self._probe_stream_dimensions(url)
                     self.active_processes[stream_id]["stream_dimensions"] = dimensions
-                    logger.info(f"Stream dimensions: {dimensions[0]}x{dimensions[1]}")
+                    logger.info(f"[{stream_id}] Stream dimensions for detection: {dimensions[0]}x{dimensions[1]}")
                 except Exception as e:
-                    logger.warning(f"Failed to probe dimensions: {e}")
-                    logger.warning("Detection may not work correctly")
+                    logger.warning(f"[{stream_id}] Failed to probe dimensions: {e}")
+                    logger.warning(f"[{stream_id}] Detection may not work correctly without dimensions")
 
             # Start stderr monitor
             asyncio.create_task(self._monitor_ffmpeg_stderr(stream_id, process))
@@ -666,24 +673,30 @@ class StreamsService:
         """Extract raw BGR24 frame, run detection, render, encode to JPEG."""
         import numpy as np
         import cv2
+        import time
         from ..api.detection import get_onnx_session
         from ..services.detection import (
             preprocess_frame, run_inference, parse_detections,
             filter_detections, render_bounding_boxes
         )
 
+        logger.debug(f"[{stream_id}] Starting detection frame processing")
+        pipeline_start = time.perf_counter()
+
         process = proc_data["process"]
         buffer = proc_data["buffer"]
         dimensions = proc_data.get("stream_dimensions")
 
         if not dimensions:
-            logger.error(f"Stream dimensions unknown for detection: {stream_id}")
+            logger.error(f"[{stream_id}] Stream dimensions unknown for detection")
             return (False, b'')
 
         width, height = dimensions
         frame_size = width * height * 3  # BGR = 3 bytes per pixel
+        logger.debug(f"[{stream_id}] Reading raw BGR24 frame: {width}x{height} = {frame_size} bytes")
 
         # Read raw frame bytes
+        read_start = time.perf_counter()
         while len(buffer) < frame_size:
             try:
                 chunk = await asyncio.wait_for(
@@ -691,14 +704,17 @@ class StreamsService:
                     timeout=FRAME_READ_TIMEOUT
                 )
             except asyncio.TimeoutError:
-                logger.debug(f"Timeout waiting for raw frame data: {stream_id}")
+                logger.warning(f"[{stream_id}] Timeout waiting for raw frame data (buffer: {len(buffer)}/{frame_size} bytes)")
                 return (False, b'')
 
             if not chunk:
-                logger.error(f"FFmpeg stdout closed: {stream_id}")
+                logger.error(f"[{stream_id}] FFmpeg stdout closed during detection frame read")
                 return None
 
             buffer.extend(chunk)
+
+        read_time_ms = (time.perf_counter() - read_start) * 1000
+        logger.debug(f"[{stream_id}] Frame read complete: {read_time_ms:.1f}ms")
 
         # Extract frame bytes
         frame_bytes = bytes(buffer[:frame_size])
@@ -706,43 +722,68 @@ class StreamsService:
 
         # Convert to NumPy array
         frame_bgr = np.frombuffer(frame_bytes, dtype=np.uint8).reshape((height, width, 3))
+        logger.debug(f"[{stream_id}] Converted to NumPy array: shape={frame_bgr.shape}")
 
         # Run detection pipeline
         try:
             onnx_session = get_onnx_session()
             if onnx_session is None:
-                logger.warning("ONNX session not available, skipping detection")
+                logger.warning(f"[{stream_id}] ONNX session not available, skipping detection")
                 # Encode without detection
+                encode_start = time.perf_counter()
                 _, jpeg_bytes = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                encode_time_ms = (time.perf_counter() - encode_start) * 1000
+                logger.debug(f"[{stream_id}] Encoded frame without detection: {encode_time_ms:.1f}ms")
                 return (True, jpeg_bytes.tobytes())
 
             detection_config = proc_data.get("detection_config", {})
             enabled_labels = detection_config.get("enabled_labels", ["person"])
             min_confidence = detection_config.get("min_confidence", 0.7)
+            logger.debug(f"[{stream_id}] Detection config: labels={enabled_labels}, min_conf={min_confidence}")
 
             # Preprocess
+            preprocess_start = time.perf_counter()
             preprocessed, scale, padding = preprocess_frame(frame_bgr, target_size=640)
+            preprocess_time_ms = (time.perf_counter() - preprocess_start) * 1000
+            logger.debug(f"[{stream_id}] Preprocessing: {preprocess_time_ms:.1f}ms")
 
             # Inference
+            inference_start = time.perf_counter()
             outputs = run_inference(onnx_session, preprocessed)
+            inference_time_ms = (time.perf_counter() - inference_start) * 1000
+            logger.debug(f"[{stream_id}] Inference: {inference_time_ms:.1f}ms")
 
             # Parse detections
+            parse_start = time.perf_counter()
             detections = parse_detections(outputs, scale, padding, (height, width))
+            parse_time_ms = (time.perf_counter() - parse_start) * 1000
+            logger.debug(f"[{stream_id}] Parsing: {parse_time_ms:.1f}ms, detections={len(detections)}")
 
             # Filter
+            filter_start = time.perf_counter()
             filtered_detections = filter_detections(detections, enabled_labels, min_confidence)
+            filter_time_ms = (time.perf_counter() - filter_start) * 1000
+            logger.debug(f"[{stream_id}] Filtering: {filter_time_ms:.1f}ms, filtered={len(filtered_detections)}")
 
             # Render bounding boxes
+            render_start = time.perf_counter()
             render_bounding_boxes(frame_bgr, filtered_detections)
+            render_time_ms = (time.perf_counter() - render_start) * 1000
+            logger.debug(f"[{stream_id}] Rendering: {render_time_ms:.1f}ms")
 
             # Encode to JPEG
+            encode_start = time.perf_counter()
             _, jpeg_bytes = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            encode_time_ms = (time.perf_counter() - encode_start) * 1000
+            logger.debug(f"[{stream_id}] Encoding: {encode_time_ms:.1f}ms")
 
-            logger.debug(f"Detection frame: {len(filtered_detections)} objects detected")
+            total_time_ms = (time.perf_counter() - pipeline_start) * 1000
+            logger.info(f"[{stream_id}] Detection pipeline complete: {total_time_ms:.1f}ms total, {len(filtered_detections)} detections")
+
             return (True, jpeg_bytes.tobytes())
 
         except Exception as e:
-            logger.error(f"Detection pipeline error: {e}", exc_info=True)
+            logger.error(f"[{stream_id}] Detection pipeline error: {e}", exc_info=True)
             # Fallback: encode frame without detection
             _, jpeg_bytes = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
             return (True, jpeg_bytes.tobytes())

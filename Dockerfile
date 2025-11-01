@@ -31,7 +31,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     APP_PORT=8000 \
     NVIDIA_DRIVER_CAPABILITIES="compute,video,utility" \
-    YOLO_CONFIG_DIR=/app/config/yolo
+    YOLO_CONFIG_DIR=/app/config/yolo \
+    YOLO_VERBOSE=False
 
 WORKDIR /app
 
