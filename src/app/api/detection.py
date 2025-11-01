@@ -45,6 +45,11 @@ def get_onnx_session():
     return _onnx_session
 
 
+def get_yolo_config_singleton() -> YOLOConfig | None:
+    """Get global YOLO configuration singleton."""
+    return _yolo_config
+
+
 @router.get("/yolo/config", response_model=YOLOConfig)
 async def get_yolo_config():
     """

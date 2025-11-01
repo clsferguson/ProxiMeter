@@ -664,7 +664,7 @@ class StreamsService:
         import numpy as np
         import cv2
         import time
-        from ..api.detection import get_onnx_session
+        from ..api.detection import get_onnx_session, get_yolo_config_singleton
         from ..services.detection import (
             preprocess_frame, run_inference, parse_detections,
             filter_detections, render_bounding_boxes
@@ -731,9 +731,20 @@ class StreamsService:
             min_confidence = detection_config.get("min_confidence", 0.7)
             logger.debug(f"[{stream_id}] Detection config: labels={enabled_labels}, min_conf={min_confidence}")
 
+            # Get YOLO model image size (must match ONNX model input dimensions)
+            yolo_config = get_yolo_config_singleton()
+            if yolo_config is None:
+                logger.error(f"[{stream_id}] YOLO config not available")
+                # Fallback: encode without detection
+                _, jpeg_bytes = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                return (True, jpeg_bytes.tobytes())
+
+            target_size = yolo_config.image_size
+            logger.debug(f"[{stream_id}] Using YOLO image size: {target_size}x{target_size}")
+
             # Preprocess
             preprocess_start = time.perf_counter()
-            preprocessed, scale, padding = preprocess_frame(frame_bgr, target_size=640)
+            preprocessed, scale, padding = preprocess_frame(frame_bgr, target_size=target_size)
             preprocess_time_ms = (time.perf_counter() - preprocess_start) * 1000
             logger.debug(f"[{stream_id}] Preprocessing: {preprocess_time_ms:.1f}ms")
 
