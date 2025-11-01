@@ -119,12 +119,11 @@ class Detection(BaseModel):
 
 
 class StreamDetectionConfig(BaseModel):
-    """Per-stream object detection configuration."""
+    """Per-stream object detection configuration.
 
-    enabled: bool = Field(
-        default=False,
-        description="Enable/disable object detection for this stream"
-    )
+    Note: Detection is ALWAYS enabled - this is the core purpose of the application.
+    This config controls WHICH objects to detect and confidence thresholds.
+    """
 
     enabled_labels: List[str] = Field(
         default_factory=lambda: ["person"],

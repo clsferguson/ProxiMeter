@@ -428,22 +428,17 @@ class StreamsService:
             # Validate
             if not validate_rtsp_url(url, params, self.gpu_backend):
                 raise ValueError("Invalid RTSP URL or params")
-            
-            # Check if detection is enabled for this stream
-            detection_enabled = stream.get("detection", {}).get("enabled", False)
+
+            # Detection is ALWAYS enabled - this is the core purpose of the app
             detection_config = stream.get("detection", {})
+            logger.info(f"[{stream_id}] Detection active: labels={detection_config.get('enabled_labels', ['person'])}, min_conf={detection_config.get('min_confidence', 0.7)}")
 
-            if detection_enabled:
-                logger.info(f"[{stream_id}] Detection enabled: labels={detection_config.get('enabled_labels', ['person'])}, min_conf={detection_config.get('min_confidence', 0.7)}")
-            else:
-                logger.debug(f"[{stream_id}] Detection disabled")
-
-            # Build command
+            # Build command (detection always enabled)
             cmd = build_ffmpeg_command(
                 rtsp_url=url,
                 ffmpeg_params=params,
                 gpu_backend=self.gpu_backend,
-                detection_enabled=detection_enabled
+                detection_enabled=True  # Always True - detection is the core purpose
             )
             
             logger.info(f"Starting FFmpeg: {stream_id} ({mask_rtsp_credentials(url)})")
@@ -453,32 +448,30 @@ class StreamsService:
             self.active_processes[stream_id] = {
                 "process": None,
                 "buffer": bytearray(),
-                "detection_enabled": detection_enabled,
                 "detection_config": stream.get("detection", {}),
                 "stream_dimensions": None,  # Will be populated from FFprobe
             }
-            
+
             # Start subprocess
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
-            
+
             # Update with process
             self.active_processes[stream_id]["process"] = process
             logger.debug(f"FFmpeg started: PID={process.pid}")
-            
-            # Get stream dimensions if detection enabled
-            if detection_enabled:
-                try:
-                    logger.debug(f"[{stream_id}] Probing stream dimensions for detection...")
-                    dimensions = await self._probe_stream_dimensions(url)
-                    self.active_processes[stream_id]["stream_dimensions"] = dimensions
-                    logger.info(f"[{stream_id}] Stream dimensions for detection: {dimensions[0]}x{dimensions[1]}")
-                except Exception as e:
-                    logger.warning(f"[{stream_id}] Failed to probe dimensions: {e}")
-                    logger.warning(f"[{stream_id}] Detection may not work correctly without dimensions")
+
+            # Get stream dimensions (ALWAYS needed for detection)
+            try:
+                logger.debug(f"[{stream_id}] Probing stream dimensions for detection...")
+                dimensions = await self._probe_stream_dimensions(url)
+                self.active_processes[stream_id]["stream_dimensions"] = dimensions
+                logger.info(f"[{stream_id}] Stream dimensions for detection: {dimensions[0]}x{dimensions[1]}")
+            except Exception as e:
+                logger.warning(f"[{stream_id}] Failed to probe dimensions: {e}")
+                logger.warning(f"[{stream_id}] Detection may not work correctly without dimensions")
 
             # Start stderr monitor
             asyncio.create_task(self._monitor_ffmpeg_stderr(stream_id, process))
@@ -586,11 +579,12 @@ class StreamsService:
     # ========================================================================
     
     async def get_frame(self, stream_id: str) -> tuple[bool, bytes] | None:
-        """Get next frame from FFmpeg stdout (MJPEG or raw BGR24 with detection).
+        """Get next frame from FFmpeg stdout with YOLO object detection.
 
-        When detection is disabled: Reads MJPEG frames from stdout.
-        When detection is enabled: Reads raw BGR24 frames, runs YOLO inference,
-        renders bounding boxes, and encodes to JPEG.
+        Reads raw BGR24 frames from FFmpeg, runs YOLO inference, renders bounding boxes
+        with labels and confidence scores, and encodes to JPEG for streaming.
+
+        Detection is ALWAYS enabled - this is the core purpose of the application.
 
         Args:
             stream_id: Stream UUID
@@ -605,7 +599,6 @@ class StreamsService:
         proc_data = self.active_processes[stream_id]
         process = proc_data["process"]
         buffer = proc_data["buffer"]
-        detection_enabled = proc_data.get("detection_enabled", False)
 
         # Check if alive
         if process.returncode is not None:
@@ -613,12 +606,9 @@ class StreamsService:
             return None
 
         try:
-            # DETECTION MODE: Raw BGR24 frames
-            if detection_enabled:
-                return await self._get_frame_with_detection(stream_id, proc_data)
-
-            # NORMAL MODE: MJPEG frames
-            return await self._get_mjpeg_frame(stream_id, proc_data)
+            # DETECTION MODE: Always process with YOLO detection
+            # This is the core purpose of the application
+            return await self._get_frame_with_detection(stream_id, proc_data)
 
         except Exception as e:
             logger.error(f"Frame read error for {stream_id}: {e}", exc_info=True)
