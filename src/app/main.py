@@ -101,6 +101,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("ProxiMeter starting...")
     logger.info("=" * 80)
 
+    # Set process title for nvidia-smi visibility (B5 fix)
+    try:
+        import setproctitle
+        gpu_id = os.environ.get("CUDA_VISIBLE_DEVICES", "0")
+        process_name = f"proximeter.detector.onnx_{gpu_id}"
+        setproctitle.setproctitle(process_name)
+        logger.info(f"Process title set: {process_name}")
+    except ImportError:
+        logger.warning("setproctitle not available - process will show as 'python3.12' in nvidia-smi")
+    except Exception as e:
+        logger.warning(f"Failed to set process title: {e}")
+
     try:
         # Initialize YOLO model configuration
         from .models.detection import YOLOConfig

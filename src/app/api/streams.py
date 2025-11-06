@@ -494,29 +494,34 @@ async def stream_mjpeg(
     async def generate_frames():
         """Generate MJPEG multipart stream at locked 5fps."""
         frame_count = 0  # Initialize before try block
+
+        # Register viewer connection (B1, B2 fix)
+        service.register_mjpeg_viewer(stream_id)
+
         try:
             frame_interval = 1.0 / FPS
             last_time = 0.0
-            
+
             while True:
                 current_time = asyncio.get_event_loop().time()
-                
+
                 # Throttle to 5fps
                 if last_time > 0:
                     elapsed = current_time - last_time
                     if elapsed < frame_interval:
                         await asyncio.sleep(frame_interval - elapsed)
-                
-                frame_data = await service.get_frame(stream_id)
+
+                # Get latest processed frame (B7 optimization - JPEG encoding on demand)
+                frame_data = await service.get_frame_for_mjpeg(stream_id)
                 if frame_data is None:
                     logger.warning(f"MJPEG ended - no more frames: {stream_id}")
                     break
-                
+
                 success, jpeg_bytes = frame_data
                 if not success or not jpeg_bytes:
                     await asyncio.sleep(0.1)
                     continue
-                
+
                 # Yield MJPEG multipart frame
                 yield (
                     b'--frame\r\n'
@@ -524,19 +529,22 @@ async def stream_mjpeg(
                     b'Content-Length: ' + str(len(jpeg_bytes)).encode() + b'\r\n\r\n' +
                     jpeg_bytes + b'\r\n'
                 )
-                
+
                 frame_count += 1
                 last_time = asyncio.get_event_loop().time()
-                
+
                 # Log every 10 seconds
                 if frame_count % 50 == 0:
                     logger.debug(f"MJPEG {stream_id}: {frame_count} frames")
-                
+
         except asyncio.CancelledError:
             logger.info(f"MJPEG cancelled: {stream_id} ({frame_count} frames)")
             raise
         except Exception as e:
             logger.error(f"MJPEG error for {stream_id}: {e}", exc_info=True)
+        finally:
+            # Unregister viewer on disconnect (B1, B2 fix)
+            service.unregister_mjpeg_viewer(stream_id)
 
     
     return StreamingResponse(

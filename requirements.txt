@@ -14,3 +14,4 @@ Pillow==12.0.0                      # Latest: Oct 2025
 # YOLO Object Detection (Feature 005)
 ultralytics==8.3.222                # YOLO11/YOLOv9 models with ONNX export
 onnxruntime-gpu==1.23.2             # GPU-accelerated inference runtime
+setproctitle==1.3.3                 # Process naming for nvidia-smi visibility
