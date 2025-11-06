@@ -30,7 +30,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     APP_PORT=8000 \
-    NVIDIA_DRIVER_CAPABILITIES="compute,video,utility"
+    NVIDIA_DRIVER_CAPABILITIES="compute,video,utility" \
+    YOLO_CONFIG_DIR=/app/config/yolo \
+    YOLO_VERBOSE=False
 
 WORKDIR /app
 
@@ -67,15 +69,15 @@ COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Setup directories with correct permissions
-RUN mkdir -p /app/config && chown -R appuser:appuser /app
+RUN mkdir -p /app/config /app/models /app/config/yolo && chown -R appuser:appuser /app
 RUN mkdir -p /app/src/app/static/frontend
 ENV STATIC_ROOT=/app/src/app/static/frontend
 
 # Copy frontend build from previous stage
 COPY --from=frontend-build /app/frontend/dist /app/src/app/static/frontend
 
-# Volume for persistent config
-VOLUME ["/app/config"]
+# Volumes for persistent config and YOLO model cache
+VOLUME ["/app/config", "/app/models"]
 
 # Expose port
 EXPOSE ${APP_PORT}

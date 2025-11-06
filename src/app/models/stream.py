@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
+from app.models.detection import StreamDetectionConfig
 
 # ============================================================================
 # Validation Helpers
@@ -88,7 +89,12 @@ class Stream(BaseModel):
         default="stopped",
         description="Current processing status"
     )
-    
+
+    detection: StreamDetectionConfig = Field(
+        default_factory=StreamDetectionConfig,
+        description="Object detection configuration for this stream"
+    )
+
     @model_validator(mode="after")
     def validate_rtsp_url_format(self) -> Stream:
         """Validate RTSP URL protocol."""
@@ -123,7 +129,12 @@ class NewStream(BaseModel):
         default_factory=list,
         description="Custom FFmpeg parameters (empty uses defaults)"
     )
-    
+
+    detection: StreamDetectionConfig = Field(
+        default_factory=StreamDetectionConfig,
+        description="Object detection configuration for this stream"
+    )
+
     @model_validator(mode="after")
     def validate_rtsp_url_format(self) -> NewStream:
         """Validate RTSP URL protocol."""
@@ -163,7 +174,12 @@ class EditStream(BaseModel):
         default=None,
         description="Custom FFmpeg parameters"
     )
-    
+
+    detection: StreamDetectionConfig | None = Field(
+        default=None,
+        description="Object detection configuration"
+    )
+
     @model_validator(mode="after")
     def validate_rtsp_url_format(self) -> EditStream:
         """Validate RTSP URL protocol if provided."""
