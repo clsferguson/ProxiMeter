@@ -52,7 +52,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .api import health, streams, zones
+from .api import health, streams, zones, detection
 from .api.errors import (
     validation_exception_handler,
     http_exception_handler,
@@ -100,18 +100,62 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("=" * 80)
     logger.info("ProxiMeter starting...")
     logger.info("=" * 80)
-    
+
+    # Set process title for nvidia-smi visibility (B5 fix)
     try:
+        import setproctitle
+        gpu_id = os.environ.get("CUDA_VISIBLE_DEVICES", "0")
+        process_name = f"proximeter.detector.onnx_{gpu_id}"
+        setproctitle.setproctitle(process_name)
+        logger.info(f"Process title set: {process_name}")
+    except ImportError:
+        logger.warning("setproctitle not available - process will show as 'python3.12' in nvidia-smi")
+    except Exception as e:
+        logger.warning(f"Failed to set process title: {e}")
+
+    try:
+        # Initialize YOLO model configuration
+        from .models.detection import YOLOConfig
+        from pathlib import Path
+
+        yolo_model = os.getenv("YOLO_MODEL", "yolo11n")
+        yolo_size = int(os.getenv("YOLO_IMAGE_SIZE", "640"))
+        gpu_backend_env = os.getenv("GPU_BACKEND_DETECTED", "none")
+        model_path = f"/app/models/{yolo_model}_{yolo_size}.onnx"
+
+        yolo_config = YOLOConfig(
+            model_name=yolo_model,
+            image_size=yolo_size,
+            backend=gpu_backend_env,
+            model_path=model_path
+        )
+        detection.set_yolo_config(yolo_config)
+        logger.info(f"YOLO config: {yolo_model} ({yolo_size}x{yolo_size}), backend={gpu_backend_env}")
+
+        # Initialize ONNX Runtime session if model exists
+        if Path(model_path).exists():
+            from .services.yolo import create_onnx_session
+            try:
+                onnx_session = create_onnx_session(model_path, gpu_backend_env, fail_fast=False)
+                detection.set_onnx_session(onnx_session)
+                logger.info(f"ONNX Runtime session initialized: {model_path}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize ONNX session: {e}")
+                logger.warning("Detection features will be unavailable")
+        else:
+            logger.warning(f"YOLO model not found at {model_path}")
+            logger.warning("Run container startup to download model via entrypoint.sh")
+
         # Initialize singleton
         container.streams_service = StreamsService()
         gpu_backend = container.streams_service.gpu_backend
-        
+
         if gpu_backend == "none":
             logger.warning("No GPU detected - streams will fail to start")
             logger.warning("Requires NVIDIA/AMD/Intel GPU with drivers")
         else:
             logger.info(f"GPU backend: {gpu_backend}")
-        
+
         # Auto-start streams
         await container.streams_service.start_all_streams()
         
@@ -222,6 +266,7 @@ app.add_middleware(RateLimitMiddleware, requests_per_second=5.0, burst=10)
 app.include_router(health.router, tags=["health"])
 app.include_router(streams.router, prefix="/api/streams", tags=["streams"])
 app.include_router(zones.router, prefix="/api", tags=["zones"])
+app.include_router(detection.router, tags=["detection"])
 
 # ============================================================================
 # Static Files (React Frontend)

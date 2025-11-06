@@ -1,5 +1,12 @@
 node_modules/
 dist/
+dist-ssr/
+build/
 coverage/
 .vscode/
 .idea/
+*.log
+.env*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml

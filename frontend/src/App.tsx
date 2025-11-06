@@ -12,6 +12,8 @@ import Dashboard from './pages/Dashboard'
 import AddStream from './pages/AddStream'
 import EditStream from './pages/EditStream'
 import PlayStream from './pages/PlayStream'
+import StreamDetection from './pages/StreamDetection'
+import ModelManagement from './pages/ModelManagement'
 import NotFound from './pages/NotFound'
 
 function App() {
@@ -27,10 +29,16 @@ function App() {
               {/* Stream Management */}
               <Route path="/add" element={<AddStream />} />
               <Route path="/edit/:streamId" element={<EditStream />} />
-              
+
               {/* Stream Playback */}
               <Route path="/play/:streamId" element={<PlayStream />} />
-              
+
+              {/* Detection Configuration */}
+              <Route path="/streams/:streamId/detection" element={<StreamDetection />} />
+
+              {/* Model Management */}
+              <Route path="/models" element={<ModelManagement />} />
+
               {/* 404 Not Found */}
               <Route path="*" element={<NotFound />} />
             </Routes>
