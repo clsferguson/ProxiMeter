@@ -43,58 +43,74 @@ FORBIDDEN_SHELL_CHARS: Final[set[str]] = {";", "&", "|", ">", "<", "`", "$", "\n
 def build_ffmpeg_command(
     rtsp_url: str,
     ffmpeg_params: list[str],
-    gpu_backend: str | None = None
+    gpu_backend: str | None = None,
+    detection_enabled: bool = False
 ) -> list[str]:
     """Build FFmpeg command for RTSP processing with GPU acceleration.
-    
+
     Command structure:
     1. User params (can override defaults)
     2. Input (-i rtsp://...)
     3. FPS limiter (-r 5)
     4. GPU download filter (if using GPU)
-    5. MJPEG output to stdout
-    
+    5. Output format:
+       - Raw BGR24 if detection_enabled=True (for YOLO inference)
+       - MJPEG if detection_enabled=False (for direct streaming)
+
     Args:
         rtsp_url: RTSP URL to process
         ffmpeg_params: User-provided parameters (validated)
         gpu_backend: GPU backend (nvidia/amd/intel/none)
-        
+        detection_enabled: If True, output raw BGR24 frames for detection
+
     Returns:
         Command list for subprocess.run()
-        
+
     Example:
         >>> cmd = build_ffmpeg_command(
         ...     "rtsp://cam/stream",
         ...     ["-rtsp_transport", "tcp"],
-        ...     "nvidia"
+        ...     "nvidia",
+        ...     detection_enabled=True
         ... )
     """
     cmd = ["ffmpeg"]
-    
-    logger.debug(f"Building FFmpeg command: GPU={gpu_backend}, input_params={len(ffmpeg_params)}")
-    
+
+    logger.debug(f"Building FFmpeg command: GPU={gpu_backend}, detection={detection_enabled}, input_params={len(ffmpeg_params)}")
+
     # User params first (allows override)
     cmd.extend(ffmpeg_params)
-    
+
     # Input
     cmd.extend(["-i", rtsp_url])
-    
+
     # Force 5fps output (constitution requirement)
     cmd.extend(["-r", "5"])
-    
+
     # GPU download filter if using hardware acceleration
     if gpu_backend and gpu_backend != "none":
         cmd.extend(["-vf", "hwdownload,format=nv12"])
         logger.debug(f"Added GPU download filter for {gpu_backend}")
-    
-    # MJPEG output to stdout
-    cmd.extend([
-        "-c:v", "mjpeg",
-        "-q:v", "3",  # Quality 3 (high quality, 1-31 scale)
-        "-f", "mjpeg",
-        "-"  # stdout
-    ])
-    
+
+    # Output format depends on detection mode
+    if detection_enabled:
+        # Raw BGR24 frames for YOLO inference
+        cmd.extend([
+            "-pix_fmt", "bgr24",
+            "-f", "rawvideo",
+            "-"  # stdout
+        ])
+        logger.debug("Output: raw BGR24 frames for detection pipeline")
+    else:
+        # MJPEG output to stdout (default)
+        cmd.extend([
+            "-c:v", "mjpeg",
+            "-q:v", "3",  # Quality 3 (high quality, 1-31 scale)
+            "-f", "mjpeg",
+            "-"  # stdout
+        ])
+        logger.debug("Output: MJPEG stream")
+
     logger.debug(f"FFmpeg command ({len(cmd)} total params): {' '.join(cmd)}")
     return cmd
 

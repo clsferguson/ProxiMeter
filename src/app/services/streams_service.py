@@ -81,22 +81,47 @@ class StreamsService:
     
     def __init__(self) -> None:
         """Initialize service and detect GPU backend.
-        
+
         Note: Does not raise if GPU unavailable - individual stream starts
         will fail with clear error messages.
         """
         self.active_processes: dict[str, dict[str, Any]] = {}
+        self.active_processes_lock = asyncio.Lock()
+        self.active_mjpeg_viewers: dict[str, int] = {}  # {stream_id: viewer_count}
         self.gpu_backend = get_gpu_backend()
-        
+
         if self.gpu_backend == "none":
             logger.warning("No GPU detected - stream starts will fail")
         else:
             logger.info(f"StreamsService initialized: GPU={self.gpu_backend}")
     
     # ========================================================================
+    # MJPEG Viewer Tracking
+    # ========================================================================
+
+    def register_mjpeg_viewer(self, stream_id: str) -> None:
+        """Register an MJPEG viewer connection for conditional rendering."""
+        self.active_mjpeg_viewers[stream_id] = self.active_mjpeg_viewers.get(stream_id, 0) + 1
+        logger.info(f"[{stream_id}] MJPEG viewer connected (total: {self.active_mjpeg_viewers[stream_id]})")
+
+    def unregister_mjpeg_viewer(self, stream_id: str) -> None:
+        """Unregister an MJPEG viewer connection."""
+        if stream_id in self.active_mjpeg_viewers:
+            self.active_mjpeg_viewers[stream_id] -= 1
+            if self.active_mjpeg_viewers[stream_id] <= 0:
+                del self.active_mjpeg_viewers[stream_id]
+                logger.info(f"[{stream_id}] Last MJPEG viewer disconnected")
+            else:
+                logger.info(f"[{stream_id}] MJPEG viewer disconnected (remaining: {self.active_mjpeg_viewers[stream_id]})")
+
+    def has_mjpeg_viewers(self, stream_id: str) -> bool:
+        """Check if stream has active MJPEG viewers."""
+        return self.active_mjpeg_viewers.get(stream_id, 0) > 0
+
+    # ========================================================================
     # Stream Retrieval
     # ========================================================================
-    
+
     async def list_streams(self) -> list[dict]:
         """List all configured streams sorted by display order."""
         try:
@@ -393,9 +418,160 @@ class StreamsService:
 
 
     # ========================================================================
+    # Continuous Frame Processing (Background Task)
+    # ========================================================================
+
+    async def _continuous_frame_processor(self, stream_id: str) -> None:
+        """Continuously read frames, run detection, and store latest frame.
+
+        This prevents buffer accumulation and ensures detection runs
+        even when no one is viewing the stream (fixes B1 and B2).
+
+        Pipeline:
+        1. Read raw BGR24 frame from FFmpeg stdout
+        2. Run YOLO detection (always)
+        3. Report detections (logs/metrics)
+        4. IF viewers connected: render bounding boxes, store annotated frame
+        5. ELSE: discard frame (no rendering/storage needed)
+        6. Sleep to maintain 5 FPS
+        """
+        import numpy as np
+        import cv2
+        import time
+        from ..api.detection import get_onnx_session, get_yolo_config_singleton
+        from ..services.detection import (
+            preprocess_frame, run_inference, parse_detections,
+            filter_detections, render_bounding_boxes
+        )
+
+        logger.info(f"[{stream_id}] Starting continuous frame processor")
+
+        while stream_id in self.active_processes:
+            try:
+                proc_data = self.active_processes[stream_id]
+                process = proc_data["process"]
+                buffer = proc_data["buffer"]
+                dimensions = proc_data.get("stream_dimensions")
+
+                if not dimensions:
+                    logger.error(f"[{stream_id}] No dimensions available")
+                    await asyncio.sleep(1.0)
+                    continue
+
+                if process.returncode is not None:
+                    logger.warning(f"[{stream_id}] FFmpeg process ended (code {process.returncode})")
+                    break
+
+                pipeline_start = time.perf_counter()
+                width, height = dimensions
+                frame_size = width * height * 3  # BGR = 3 bytes per pixel
+
+                # Read raw frame bytes
+                read_start = time.perf_counter()
+                while len(buffer) < frame_size:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            process.stdout.read(frame_size - len(buffer)),
+                            timeout=FRAME_READ_TIMEOUT
+                        )
+                    except asyncio.TimeoutError:
+                        logger.debug(f"[{stream_id}] Timeout waiting for frame data")
+                        break
+
+                    if not chunk:
+                        logger.error(f"[{stream_id}] FFmpeg stdout closed")
+                        return
+
+                    buffer.extend(chunk)
+
+                if len(buffer) < frame_size:
+                    # Not enough data, try again
+                    await asyncio.sleep(0.05)
+                    continue
+
+                read_time_ms = (time.perf_counter() - read_start) * 1000
+
+                # Extract frame bytes
+                frame_bytes = bytes(buffer[:frame_size])
+                del buffer[:frame_size]
+
+                # Convert to NumPy array (make writable copy for OpenCV to draw on)
+                frame_bgr = np.frombuffer(frame_bytes, dtype=np.uint8).reshape((height, width, 3)).copy()
+
+                # Run detection pipeline
+                try:
+                    onnx_session = get_onnx_session()
+                    if onnx_session is None:
+                        logger.warning(f"[{stream_id}] ONNX session not available")
+                        await asyncio.sleep(0.2)
+                        continue
+
+                    detection_config = proc_data.get("detection_config", {})
+                    enabled_labels = detection_config.get("enabled_labels", ["person"])
+                    min_confidence = detection_config.get("min_confidence", 0.7)
+
+                    # Get YOLO model image size
+                    yolo_config = get_yolo_config_singleton()
+                    if yolo_config is None:
+                        logger.error(f"[{stream_id}] YOLO config not available")
+                        await asyncio.sleep(0.2)
+                        continue
+
+                    target_size = yolo_config.image_size
+
+                    # Preprocess
+                    preprocessed, scale, padding = preprocess_frame(frame_bgr, target_size=target_size)
+
+                    # Inference
+                    outputs = run_inference(onnx_session, preprocessed)
+
+                    # Parse detections
+                    detections = parse_detections(outputs, scale, padding, (height, width))
+
+                    # Filter
+                    filtered_detections = filter_detections(detections, enabled_labels, min_confidence)
+
+                    # Report detections (always - this is the core purpose)
+                    if filtered_detections:
+                        logger.info(f"[{stream_id}] Detected {len(filtered_detections)} objects")
+                        # TODO: Add metrics reporting here
+
+                    # Conditional rendering based on viewer presence (B6 optimization)
+                    has_viewers = self.has_mjpeg_viewers(stream_id)
+                    if has_viewers:
+                        # Render bounding boxes only when someone is watching
+                        render_bounding_boxes(frame_bgr, filtered_detections)
+                        proc_data["latest_frame"] = frame_bgr
+                        proc_data["latest_frame_time"] = time.time()
+                    else:
+                        # No viewers - skip rendering to save CPU/GPU
+                        proc_data["latest_frame"] = None
+                        logger.debug(f"[{stream_id}] Skipping rendering - no viewers")
+
+                    total_time_ms = (time.perf_counter() - pipeline_start) * 1000
+                    logger.debug(f"[{stream_id}] Pipeline: {total_time_ms:.1f}ms, {len(filtered_detections)} detections")
+
+                except Exception as e:
+                    logger.error(f"[{stream_id}] Detection pipeline error: {e}", exc_info=True)
+
+                # Maintain 5 FPS (200ms per frame)
+                elapsed = time.perf_counter() - pipeline_start
+                if elapsed < 0.2:
+                    await asyncio.sleep(0.2 - elapsed)
+
+            except asyncio.CancelledError:
+                logger.info(f"[{stream_id}] Frame processor cancelled")
+                break
+            except Exception as e:
+                logger.error(f"[{stream_id}] Frame processor error: {e}", exc_info=True)
+                await asyncio.sleep(0.1)
+
+        logger.info(f"[{stream_id}] Frame processor stopped")
+
+    # ========================================================================
     # FFmpeg Process Control
     # ========================================================================
-    
+
     async def start_stream(self, stream_id: str, stream: dict) -> bool:
         """Start FFmpeg processing with MJPEG piping.
         
@@ -427,12 +603,17 @@ class StreamsService:
             # Validate
             if not validate_rtsp_url(url, params, self.gpu_backend):
                 raise ValueError("Invalid RTSP URL or params")
-            
-            # Build command
+
+            # Detection is ALWAYS enabled - this is the core purpose of the app
+            detection_config = stream.get("detection", {})
+            logger.info(f"[{stream_id}] Detection active: labels={detection_config.get('enabled_labels', ['person'])}, min_conf={detection_config.get('min_confidence', 0.7)}")
+
+            # Build command (detection always enabled)
             cmd = build_ffmpeg_command(
                 rtsp_url=url,
                 ffmpeg_params=params,
-                gpu_backend=self.gpu_backend
+                gpu_backend=self.gpu_backend,
+                detection_enabled=True  # Always True - detection is the core purpose
             )
             
             logger.info(f"Starting FFmpeg: {stream_id} ({mask_rtsp_credentials(url)})")
@@ -442,22 +623,38 @@ class StreamsService:
             self.active_processes[stream_id] = {
                 "process": None,
                 "buffer": bytearray(),
+                "detection_config": stream.get("detection", {}),
+                "stream_dimensions": None,  # Will be populated from FFprobe
             }
-            
+
             # Start subprocess
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
-            
+
             # Update with process
             self.active_processes[stream_id]["process"] = process
             logger.debug(f"FFmpeg started: PID={process.pid}")
-            
+
+            # Get stream dimensions (ALWAYS needed for detection)
+            try:
+                logger.debug(f"[{stream_id}] Probing stream dimensions for detection...")
+                dimensions = await self._probe_stream_dimensions(url)
+                self.active_processes[stream_id]["stream_dimensions"] = dimensions
+                logger.info(f"[{stream_id}] Stream dimensions for detection: {dimensions[0]}x{dimensions[1]}")
+            except Exception as e:
+                logger.warning(f"[{stream_id}] Failed to probe dimensions: {e}")
+                logger.warning(f"[{stream_id}] Detection may not work correctly without dimensions")
+
             # Start stderr monitor
             asyncio.create_task(self._monitor_ffmpeg_stderr(stream_id, process))
-            
+
+            # Start continuous frame processor (fixes B1, B2)
+            asyncio.create_task(self._continuous_frame_processor(stream_id))
+            logger.info(f"[{stream_id}] Started continuous frame processor background task")
+
             # Update config status
             config = load_streams()
             streams = config.get("streams", [])
@@ -559,81 +756,296 @@ class StreamsService:
     # ========================================================================
     # Frame Access
     # ========================================================================
-    
-    async def get_frame(self, stream_id: str) -> tuple[bool, bytes] | None:
-        """Get next MJPEG frame from FFmpeg stdout.
-        
-        Reads from FFmpeg stdout, parses JPEG markers, returns complete frame.
-        
+
+    async def get_frame_for_mjpeg(self, stream_id: str) -> tuple[bool, bytes] | None:
+        """Get latest processed frame and encode to JPEG for MJPEG streaming.
+
+        This method retrieves the latest frame processed by the continuous
+        frame processor background task. JPEG encoding only happens when
+        viewers request frames (B7 optimization).
+
         Args:
             stream_id: Stream UUID
-            
+
         Returns:
             (success, jpeg_bytes) if available, None if stream ended
         """
         if stream_id not in self.active_processes:
             logger.warning(f"Frame request for inactive stream: {stream_id}")
             return None
-        
+
+        proc_data = self.active_processes[stream_id]
+        latest_frame = proc_data.get("latest_frame")
+
+        if latest_frame is None:
+            # No frame available yet (or no viewers so no rendering)
+            return (False, b'')
+
+        # JPEG encode only when viewer requests it (B7 optimization)
+        import cv2
+        try:
+            _, jpeg_bytes = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            return (True, jpeg_bytes.tobytes())
+        except Exception as e:
+            logger.error(f"[{stream_id}] JPEG encoding error: {e}", exc_info=True)
+            return (False, b'')
+
+    async def get_frame(self, stream_id: str) -> tuple[bool, bytes] | None:
+        """Get next frame from FFmpeg stdout with YOLO object detection.
+
+        Reads raw BGR24 frames from FFmpeg, runs YOLO inference, renders bounding boxes
+        with labels and confidence scores, and encodes to JPEG for streaming.
+
+        Detection is ALWAYS enabled - this is the core purpose of the application.
+
+        Args:
+            stream_id: Stream UUID
+
+        Returns:
+            (success, jpeg_bytes) if available, None if stream ended
+        """
+        if stream_id not in self.active_processes:
+            logger.warning(f"Frame request for inactive stream: {stream_id}")
+            return None
+
         proc_data = self.active_processes[stream_id]
         process = proc_data["process"]
         buffer = proc_data["buffer"]
-        
+
         # Check if alive
         if process.returncode is not None:
             logger.error(f"FFmpeg dead (code {process.returncode}): {stream_id}")
             return None
-        
+
         try:
-            # Read until complete frame found
-            max_attempts = 50
-            
-            for attempt in range(max_attempts):
-                # Check buffer for complete frame
-                start_idx = buffer.find(JPEG_START_MARKER)
-                if start_idx != -1:
-                    end_idx = buffer.find(JPEG_END_MARKER, start_idx + 2)
-                    if end_idx != -1:
-                        # Extract frame
-                        jpeg_data = bytes(buffer[start_idx:end_idx + 2])
-                        del buffer[:end_idx + 2]
-                        
-                        logger.debug(f"Frame extracted: {len(jpeg_data)} bytes")
-                        return (True, jpeg_data)
-                
-                # Need more data
-                try:
-                    chunk = await asyncio.wait_for(
-                        process.stdout.read(8192),
-                        timeout=FRAME_READ_TIMEOUT
-                    )
-                except asyncio.TimeoutError:
-                    logger.debug(f"Read timeout (attempt {attempt + 1}/{max_attempts})")
-                    continue
-                
-                if not chunk:
-                    logger.error(f"FFmpeg stdout closed: {stream_id}")
-                    return None
-                
-                buffer.extend(chunk)
-                
-                # Prevent unbounded growth (10MB limit)
-                if len(buffer) > 10 * 1024 * 1024:
-                    logger.warning(f"Buffer overflow, resetting: {stream_id}")
-                    buffer[:] = buffer[-1024*1024:]
-            
-            # Max attempts reached
-            logger.error(f"Failed to extract frame after {max_attempts} attempts: {stream_id}")
-            return (False, b'')
-                
+            # DETECTION MODE: Always process with YOLO detection
+            # This is the core purpose of the application
+            return await self._get_frame_with_detection(stream_id, proc_data)
+
         except Exception as e:
             logger.error(f"Frame read error for {stream_id}: {e}", exc_info=True)
             return None
+
+    async def _get_mjpeg_frame(self, stream_id: str, proc_data: dict) -> tuple[bool, bytes] | None:
+        """Extract MJPEG frame from buffer (original logic)."""
+        process = proc_data["process"]
+        buffer = proc_data["buffer"]
+
+        max_attempts = 50
+
+        for attempt in range(max_attempts):
+            # Check buffer for complete frame
+            start_idx = buffer.find(JPEG_START_MARKER)
+            if start_idx != -1:
+                end_idx = buffer.find(JPEG_END_MARKER, start_idx + 2)
+                if end_idx != -1:
+                    # Extract frame
+                    jpeg_data = bytes(buffer[start_idx:end_idx + 2])
+                    del buffer[:end_idx + 2]
+
+                    logger.debug(f"Frame extracted: {len(jpeg_data)} bytes")
+                    return (True, jpeg_data)
+
+            # Need more data
+            try:
+                chunk = await asyncio.wait_for(
+                    process.stdout.read(8192),
+                    timeout=FRAME_READ_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                logger.debug(f"Read timeout (attempt {attempt + 1}/{max_attempts})")
+                continue
+
+            if not chunk:
+                logger.error(f"FFmpeg stdout closed: {stream_id}")
+                return None
+
+            buffer.extend(chunk)
+
+            # Prevent unbounded growth (10MB limit)
+            if len(buffer) > 10 * 1024 * 1024:
+                logger.warning(f"Buffer overflow, resetting: {stream_id}")
+                buffer[:] = buffer[-1024*1024:]
+
+        # Max attempts reached
+        logger.error(f"Failed to extract frame after {max_attempts} attempts: {stream_id}")
+        return (False, b'')
+
+    async def _get_frame_with_detection(self, stream_id: str, proc_data: dict) -> tuple[bool, bytes] | None:
+        """Extract raw BGR24 frame, run detection, render, encode to JPEG."""
+        import numpy as np
+        import cv2
+        import time
+        from ..api.detection import get_onnx_session, get_yolo_config_singleton
+        from ..services.detection import (
+            preprocess_frame, run_inference, parse_detections,
+            filter_detections, render_bounding_boxes
+        )
+
+        logger.debug(f"[{stream_id}] Starting detection frame processing")
+        pipeline_start = time.perf_counter()
+
+        process = proc_data["process"]
+        buffer = proc_data["buffer"]
+        dimensions = proc_data.get("stream_dimensions")
+
+        if not dimensions:
+            logger.error(f"[{stream_id}] Stream dimensions unknown for detection")
+            return (False, b'')
+
+        width, height = dimensions
+        frame_size = width * height * 3  # BGR = 3 bytes per pixel
+        logger.debug(f"[{stream_id}] Reading raw BGR24 frame: {width}x{height} = {frame_size} bytes")
+
+        # Read raw frame bytes
+        read_start = time.perf_counter()
+        while len(buffer) < frame_size:
+            try:
+                chunk = await asyncio.wait_for(
+                    process.stdout.read(frame_size - len(buffer)),
+                    timeout=FRAME_READ_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"[{stream_id}] Timeout waiting for raw frame data (buffer: {len(buffer)}/{frame_size} bytes)")
+                return (False, b'')
+
+            if not chunk:
+                logger.error(f"[{stream_id}] FFmpeg stdout closed during detection frame read")
+                return None
+
+            buffer.extend(chunk)
+
+        read_time_ms = (time.perf_counter() - read_start) * 1000
+        logger.debug(f"[{stream_id}] Frame read complete: {read_time_ms:.1f}ms")
+
+        # Extract frame bytes
+        frame_bytes = bytes(buffer[:frame_size])
+        del buffer[:frame_size]
+
+        # Convert to NumPy array
+        frame_bgr = np.frombuffer(frame_bytes, dtype=np.uint8).reshape((height, width, 3))
+        logger.debug(f"[{stream_id}] Converted to NumPy array: shape={frame_bgr.shape}")
+
+        # Run detection pipeline
+        try:
+            onnx_session = get_onnx_session()
+            if onnx_session is None:
+                logger.warning(f"[{stream_id}] ONNX session not available, skipping detection")
+                # Encode without detection
+                encode_start = time.perf_counter()
+                _, jpeg_bytes = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                encode_time_ms = (time.perf_counter() - encode_start) * 1000
+                logger.debug(f"[{stream_id}] Encoded frame without detection: {encode_time_ms:.1f}ms")
+                return (True, jpeg_bytes.tobytes())
+
+            detection_config = proc_data.get("detection_config", {})
+            enabled_labels = detection_config.get("enabled_labels", ["person"])
+            min_confidence = detection_config.get("min_confidence", 0.7)
+            logger.debug(f"[{stream_id}] Detection config: labels={enabled_labels}, min_conf={min_confidence}")
+
+            # Get YOLO model image size (must match ONNX model input dimensions)
+            yolo_config = get_yolo_config_singleton()
+            if yolo_config is None:
+                logger.error(f"[{stream_id}] YOLO config not available")
+                # Fallback: encode without detection
+                _, jpeg_bytes = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                return (True, jpeg_bytes.tobytes())
+
+            target_size = yolo_config.image_size
+            logger.debug(f"[{stream_id}] Using YOLO image size: {target_size}x{target_size}")
+
+            # Preprocess
+            preprocess_start = time.perf_counter()
+            preprocessed, scale, padding = preprocess_frame(frame_bgr, target_size=target_size)
+            preprocess_time_ms = (time.perf_counter() - preprocess_start) * 1000
+            logger.debug(f"[{stream_id}] Preprocessing: {preprocess_time_ms:.1f}ms")
+
+            # Inference
+            inference_start = time.perf_counter()
+            outputs = run_inference(onnx_session, preprocessed)
+            inference_time_ms = (time.perf_counter() - inference_start) * 1000
+            logger.debug(f"[{stream_id}] Inference: {inference_time_ms:.1f}ms")
+
+            # Parse detections
+            parse_start = time.perf_counter()
+            detections = parse_detections(outputs, scale, padding, (height, width))
+            parse_time_ms = (time.perf_counter() - parse_start) * 1000
+            logger.debug(f"[{stream_id}] Parsing: {parse_time_ms:.1f}ms, detections={len(detections)}")
+
+            # Filter
+            filter_start = time.perf_counter()
+            filtered_detections = filter_detections(detections, enabled_labels, min_confidence)
+            filter_time_ms = (time.perf_counter() - filter_start) * 1000
+            logger.debug(f"[{stream_id}] Filtering: {filter_time_ms:.1f}ms, filtered={len(filtered_detections)}")
+
+            # Render bounding boxes
+            render_start = time.perf_counter()
+            render_bounding_boxes(frame_bgr, filtered_detections)
+            render_time_ms = (time.perf_counter() - render_start) * 1000
+            logger.debug(f"[{stream_id}] Rendering: {render_time_ms:.1f}ms")
+
+            # Encode to JPEG
+            encode_start = time.perf_counter()
+            _, jpeg_bytes = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            encode_time_ms = (time.perf_counter() - encode_start) * 1000
+            logger.debug(f"[{stream_id}] Encoding: {encode_time_ms:.1f}ms")
+
+            total_time_ms = (time.perf_counter() - pipeline_start) * 1000
+            logger.info(f"[{stream_id}] Detection pipeline complete: {total_time_ms:.1f}ms total, {len(filtered_detections)} detections")
+
+            return (True, jpeg_bytes.tobytes())
+
+        except Exception as e:
+            logger.error(f"[{stream_id}] Detection pipeline error: {e}", exc_info=True)
+            # Fallback: encode frame without detection
+            _, jpeg_bytes = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            return (True, jpeg_bytes.tobytes())
     
     # ========================================================================
     # Helper Methods
     # ========================================================================
-    
+
+    async def _probe_stream_dimensions(self, rtsp_url: str) -> tuple[int, int]:
+        """Probe RTSP stream to get video dimensions using ffprobe.
+
+        Args:
+            rtsp_url: RTSP URL to probe
+
+        Returns:
+            Tuple of (width, height)
+        """
+        import json
+
+        cmd = [
+            "ffprobe",
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_streams",
+            "-select_streams", "v:0",
+            rtsp_url
+        ]
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=10.0)
+
+        if process.returncode != 0:
+            raise RuntimeError(f"ffprobe failed: {stderr.decode()}")
+
+        data = json.loads(stdout.decode())
+        stream_info = data.get("streams", [{}])[0]
+        width = stream_info.get("width")
+        height = stream_info.get("height")
+
+        if not width or not height:
+            raise ValueError("Could not determine stream dimensions")
+
+        return (int(width), int(height))
+
     def _find_stream_index(self, streams: list[dict], stream_id: str) -> int | None:
         """Find stream index by ID."""
         for i, stream in enumerate(streams):
