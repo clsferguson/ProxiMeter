@@ -495,8 +495,8 @@ class StreamsService:
                 frame_bytes = bytes(buffer[:frame_size])
                 del buffer[:frame_size]
 
-                # Convert to NumPy array
-                frame_bgr = np.frombuffer(frame_bytes, dtype=np.uint8).reshape((height, width, 3))
+                # Convert to NumPy array (make writable copy for OpenCV to draw on)
+                frame_bgr = np.frombuffer(frame_bytes, dtype=np.uint8).reshape((height, width, 3)).copy()
 
                 # Run detection pipeline
                 try:
