@@ -912,12 +912,12 @@ class StreamsService:
             logger.info(f"[{stream_id}] MotionDetector initialized")
 
             # Initialize object tracker (T039)
-            # BUG FIX: max_age must be >= detection_interval (50) for stationary objects
-            # Set to 60 to allow stationary objects to survive between detection checks
+            # Frigate-style tracking: lower IoU threshold for better motion tracking
+            # Reduced min_hits so tracks become ACTIVE faster (less tentative clutter)
             object_tracker = ObjectTracker(
                 max_age=60,
-                min_hits=3,
-                iou_threshold=0.3
+                min_hits=2,
+                iou_threshold=0.15
             )
             logger.info(f"[{stream_id}] ObjectTracker initialized")
 

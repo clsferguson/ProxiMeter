@@ -192,7 +192,7 @@ class TrackedObject(BaseModel):
         elif self.frames_stationary >= 50:
             self.state = ObjectState.STATIONARY
             self.detection_interval = 50
-        elif self.hits >= 3:
+        elif self.hits >= 2:
             self.state = ObjectState.ACTIVE
             self.detection_interval = 1
         else:
