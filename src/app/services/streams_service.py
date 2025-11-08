@@ -814,6 +814,22 @@ class StreamsService:
                         from ..models.motion import ObjectState
                         for state in ObjectState:
                             metrics.tracked_objects_total.labels(stream_id=stream_id, state=state.value).set(0)
+                        state_counts = {state.value: 0 for state in ObjectState}
+
+                    # Create and store MotionDetectionMetrics for SSE streaming
+                    from ..models.motion import MotionDetectionMetrics
+                    proc_data["motion_metrics"] = MotionDetectionMetrics(
+                        stream_id=stream_id,
+                        motion_regions_count=len(motion_regions) if motion_regions else 0,
+                        tracked_objects_count=state_counts.get("active", 0) + state_counts.get("tentative", 0),
+                        stationary_objects_count=state_counts.get("stationary", 0),
+                        lost_objects_count=state_counts.get("lost", 0),
+                        motion_detection_ms=motion_time_ms,
+                        yolo_inference_ms=yolo_time_ms,
+                        tracking_ms=tracking_time_ms,
+                        total_frame_time_ms=total_time_ms,
+                        timestamp=time.time()
+                    )
 
                 except Exception as e:
                     logger.error(f"[{stream_id}] Detection pipeline error: {e}", exc_info=True)

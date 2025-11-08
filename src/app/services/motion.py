@@ -116,10 +116,21 @@ class MotionDetector:
         logger.debug(f"Background subtraction: found {len(contours)} raw contours")
 
         # Step 5: Filter by minimum area and get bounding boxes
+        # Also filter out full-frame regions (light changes) per B7 optimization
+        frame_area = frame_width * frame_height
+        max_region_area = frame_area * 0.8  # Reject regions >80% of frame
         valid_bboxes = []
         for contour in contours:
             area = cv2.contourArea(contour)
             if area >= self.min_contour_area:
+                # Skip full-frame regions (lighting changes, not actual motion)
+                if area > max_region_area:
+                    logger.debug(
+                        f"Skipping full-frame motion region (lighting change): "
+                        f"area={area} pixels ({area/frame_area*100:.1f}% of frame)"
+                    )
+                    continue
+
                 x, y, w, h = cv2.boundingRect(contour)
                 # Validate coordinates per FR-022
                 if x >= 0 and y >= 0 and w > 0 and h > 0:

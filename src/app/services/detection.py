@@ -304,6 +304,11 @@ def parse_detections(
         x2 = int((x_center + width / 2 - left) / scale)
         y2 = int((y_center + height / 2 - top) / scale)
 
+        # Skip detections at edge boundaries before clamping (B7 optimization)
+        # These create invalid boxes after mapping to full frame in region-based detection
+        if x1 >= orig_w or x2 >= orig_w or y1 >= orig_h or y2 >= orig_h or x1 < 0 or y1 < 0:
+            continue
+
         # Clamp to original frame bounds
         x1 = max(0, min(x1, orig_w))
         y1 = max(0, min(y1, orig_h))
