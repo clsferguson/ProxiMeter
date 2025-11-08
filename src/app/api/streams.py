@@ -49,6 +49,61 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["streams"])
 
 # ============================================================================
+# T066: Rate Limiting for Motion Metrics Endpoints
+# ============================================================================
+
+import time
+from collections import defaultdict, deque
+from fastapi import Request
+
+class SimpleRateLimiter:
+    """Simple in-memory rate limiter using sliding window."""
+
+    def __init__(self, max_requests: int = 10, window_seconds: float = 1.0):
+        """
+        Initialize rate limiter.
+
+        Args:
+            max_requests: Maximum requests allowed per window
+            window_seconds: Window size in seconds
+        """
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        # Store timestamps per stream_id
+        self._request_log: dict[str, deque] = defaultdict(lambda: deque())
+
+    def check_rate_limit(self, stream_id: str) -> bool:
+        """
+        Check if request should be allowed based on rate limit.
+
+        Args:
+            stream_id: Stream identifier to rate limit
+
+        Returns:
+            True if request is allowed, False if rate limit exceeded
+        """
+        now = time.time()
+        window_start = now - self.window_seconds
+
+        # Get request log for this stream
+        log = self._request_log[stream_id]
+
+        # Remove timestamps outside the window
+        while log and log[0] < window_start:
+            log.popleft()
+
+        # Check if limit exceeded
+        if len(log) >= self.max_requests:
+            return False
+
+        # Add current request timestamp
+        log.append(now)
+        return True
+
+# Create global rate limiter instance (10 requests/second per stream)
+motion_metrics_limiter = SimpleRateLimiter(max_requests=10, window_seconds=1.0)
+
+# ============================================================================
 # Constants
 # ============================================================================
 
@@ -704,6 +759,207 @@ async def stream_scores_sse(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+# ============================================================================
+# Motion Detection Metrics Endpoints (Feature 006)
+# ============================================================================
+
+@router.get("/{stream_id}/motion/metrics")
+async def get_motion_metrics(
+    stream_id: str,
+    service: StreamsService = Depends(get_streams_service)
+) -> dict:
+    """Get current motion detection metrics for stream.
+
+    Returns:
+        MotionDetectionMetrics with counts, timing, and GPU utilization
+
+    Raises:
+        404: Stream not found
+        503: Stream not running or motion detection not initialized
+        429: Rate limit exceeded (10 requests/second per stream)
+    """
+    # T066: Rate limiting check
+    if not motion_metrics_limiter.check_rate_limit(stream_id):
+        logger.warning(f"Rate limit exceeded for motion metrics: {stream_id}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded. Maximum 10 requests per second per stream."
+        )
+
+    logger.debug(f"Motion metrics request: {stream_id}")
+
+    # Check if stream exists
+    stream = await service.get_stream(stream_id)
+    if not stream:
+        logger.warning(f"Motion metrics failed - not found: {stream_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Stream not found"
+        )
+
+    # Check if stream is running
+    if stream["status"] != "running":
+        logger.warning(f"Motion metrics failed - not running: {stream_id}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stream must be started first"
+        )
+
+    # Get metrics from active process
+    try:
+        metrics = service.get_motion_metrics(stream_id)
+        if metrics is None:
+            logger.warning(f"Motion metrics not available: {stream_id}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Motion detection not initialized"
+            )
+
+        logger.debug(f"Motion metrics returned: {stream_id}")
+        return metrics.model_dump()
+    except Exception as e:
+        logger.error(f"Motion metrics error for {stream_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get motion metrics"
+        )
+
+
+@router.get("/{stream_id}/motion/metrics/stream")
+async def stream_motion_metrics_sse(
+    stream_id: str,
+    service: StreamsService = Depends(get_streams_service)
+) -> StreamingResponse:
+    """SSE endpoint for real-time motion detection metrics at 5 FPS.
+
+    Streams MotionDetectionMetrics updates every 200ms for live dashboard display.
+    """
+    stream = await service.get_stream(stream_id)
+    if not stream:
+        logger.warning(f"Motion metrics SSE failed - not found: {stream_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Stream not found"
+        )
+
+    if stream["status"] != "running":
+        logger.warning(f"Motion metrics SSE failed - not running: {stream_id}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stream must be started first"
+        )
+
+    logger.info(f"Starting motion metrics SSE: {stream_id}")
+
+    async def event_generator():
+        """Generate SSE events with motion metrics at 5 FPS."""
+        event_count = 0
+        try:
+            while True:
+                metrics = service.get_motion_metrics(stream_id)
+                if metrics is None:
+                    logger.warning(f"Motion metrics SSE ended - no metrics: {stream_id}")
+                    break
+
+                # Send metrics as SSE event
+                yield f"data: {metrics.model_dump_json()}\n\n"
+
+                event_count += 1
+                if event_count % 50 == 0:
+                    logger.debug(f"Motion metrics SSE {stream_id}: {event_count} events")
+
+                # 5 FPS = 200ms interval
+                await asyncio.sleep(0.2)
+        except asyncio.CancelledError:
+            logger.info(f"Motion metrics SSE cancelled: {stream_id} ({event_count} events)")
+            raise
+        except Exception as e:
+            logger.error(f"Motion metrics SSE error for {stream_id}: {e}", exc_info=True)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@router.get("/{stream_id}/motion/objects")
+async def get_tracked_objects(
+    stream_id: str,
+    state: str | None = None,
+    service: StreamsService = Depends(get_streams_service)
+) -> list[dict]:
+    """Get currently tracked objects for stream.
+
+    Args:
+        stream_id: Stream identifier
+        state: Optional filter by ObjectState (tentative, active, stationary, lost)
+
+    Returns:
+        List of TrackedObject instances (serialized)
+
+    Raises:
+        404: Stream not found
+        503: Stream not running or tracking not initialized
+        429: Rate limit exceeded (10 requests/second per stream)
+    """
+    # T066: Rate limiting check
+    if not motion_metrics_limiter.check_rate_limit(stream_id):
+        logger.warning(f"Rate limit exceeded for tracked objects: {stream_id}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded. Maximum 10 requests per second per stream."
+        )
+
+    logger.debug(f"Tracked objects request: {stream_id}, state={state}")
+
+    # Check if stream exists
+    stream = await service.get_stream(stream_id)
+    if not stream:
+        logger.warning(f"Tracked objects failed - not found: {stream_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Stream not found"
+        )
+
+    # Check if stream is running
+    if stream["status"] != "running":
+        logger.warning(f"Tracked objects failed - not running: {stream_id}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stream must be started first"
+        )
+
+    # Get tracked objects from active process
+    try:
+        tracked_objects = service.get_tracked_objects(stream_id, state_filter=state)
+        if tracked_objects is None:
+            logger.warning(f"Tracked objects not available: {stream_id}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Object tracking not initialized"
+            )
+
+        logger.debug(f"Tracked objects returned: {stream_id}, count={len(tracked_objects)}")
+        return [obj.model_dump() for obj in tracked_objects]
+    except ValueError as e:
+        logger.warning(f"Invalid state filter: {state}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Tracked objects error for {stream_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get tracked objects"
+        )
 
 
 logger.debug("Stream management router initialized")

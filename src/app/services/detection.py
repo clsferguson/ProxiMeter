@@ -74,6 +74,149 @@ def preprocess_frame(
     return batch, scale, (top, left)
 
 
+def preprocess_region(
+    frame_bgr: np.ndarray,
+    region_bbox: Tuple[int, int, int, int],
+    target_size: int = 640
+) -> Tuple[np.ndarray, float, Tuple[int, int], Tuple[int, int]]:
+    """
+    Preprocess a cropped region for YOLO inference.
+
+    Steps:
+    1. Crop region from full frame (already padded in MotionDetector)
+    2. Apply letterbox resize to target_size
+    3. BGR→RGB conversion
+    4. Normalize to [0.0, 1.0]
+    5. Transpose HWC→CHW
+    6. Add batch dimension (NCHW)
+
+    Args:
+        frame_bgr: Full frame in BGR format (OpenCV native)
+        region_bbox: Region bounding box (x, y, width, height) in frame coordinates
+        target_size: Target square size for YOLO input
+
+    Returns:
+        Tuple of (preprocessed_array, scale_factor, padding, region_offset)
+        - preprocessed_array: shape (1, 3, target_size, target_size), dtype float32
+        - scale_factor: Resize scale applied to region
+        - padding: (top, left) padding added during letterbox
+        - region_offset: (x, y) offset of region in original frame
+    """
+    x, y, w, h = region_bbox
+    logger.debug(f"Preprocessing region: bbox=({x},{y},{w},{h}), target_size={target_size}")
+
+    # Step 1: Crop region from frame
+    region = frame_bgr[y:y+h, x:x+w]
+    if region.size == 0:
+        logger.warning(f"Empty region after crop: bbox=({x},{y},{w},{h}), frame_shape={frame_bgr.shape}")
+        # Return empty batch as fallback
+        empty_batch = np.zeros((1, 3, target_size, target_size), dtype=np.float32)
+        return empty_batch, 1.0, (0, 0), (x, y)
+
+    # Step 2-6: Apply same preprocessing as full frame
+    region_h, region_w = region.shape[:2]
+    scale = min(target_size / region_h, target_size / region_w)
+    new_h, new_w = int(region_h * scale), int(region_w * scale)
+
+    # Letterbox resize
+    resized = cv2.resize(region, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+    # Create padded canvas
+    canvas = np.full((target_size, target_size, 3), 114, dtype=np.uint8)
+    top = (target_size - new_h) // 2
+    left = (target_size - new_w) // 2
+    canvas[top:top+new_h, left:left+new_w] = resized
+
+    # BGR→RGB, transpose HWC→CHW, normalize, add batch dimension
+    rgb = canvas[:, :, ::-1]
+    chw = rgb.transpose((2, 0, 1))
+    normalized = chw.astype(np.float32) / 255.0
+    batch = np.expand_dims(normalized, axis=0)
+
+    logger.debug(
+        f"Region preprocessing complete: region_shape=({region_w}x{region_h}), "
+        f"scale={scale:.3f}, padding=({top},{left}), offset=({x},{y})"
+    )
+    return batch, scale, (top, left), (x, y)
+
+
+def map_detections_to_frame(
+    detections: List[Detection],
+    scale: float,
+    padding: Tuple[int, int],
+    region_offset: Tuple[int, int],
+    frame_shape: Tuple[int, int]
+) -> List[Detection]:
+    """
+    Map detection coordinates from region space to full frame space.
+
+    Steps:
+    1. Inverse letterbox transform (remove padding and scale)
+    2. Add region offset to coordinates
+    3. Clamp to frame boundaries per FR-023
+
+    Args:
+        detections: List of Detection objects in region coordinates
+        scale: Scale factor from preprocess_region()
+        padding: (top, left) padding from preprocess_region()
+        region_offset: (x, y) offset of region in original frame
+        frame_shape: (height, width) of full frame for boundary checking
+
+    Returns:
+        List of Detection objects with coordinates in full frame space
+    """
+    if not detections:
+        return []
+
+    top, left = padding
+    offset_x, offset_y = region_offset
+    frame_height, frame_width = frame_shape
+
+    logger.debug(
+        f"Mapping {len(detections)} detections: scale={scale:.3f}, "
+        f"padding=({top},{left}), offset=({offset_x},{offset_y})"
+    )
+
+    mapped_detections = []
+    for det in detections:
+        x1, y1, x2, y2 = det.bbox
+
+        # Step 1: Inverse letterbox transform
+        # Convert from model space to region space
+        x1_region = int((x1 - left) / scale)
+        y1_region = int((y1 - top) / scale)
+        x2_region = int((x2 - left) / scale)
+        y2_region = int((y2 - top) / scale)
+
+        # Step 2: Add region offset to get full frame coordinates
+        x1_frame = x1_region + offset_x
+        y1_frame = y1_region + offset_y
+        x2_frame = x2_region + offset_x
+        y2_frame = y2_region + offset_y
+
+        # Step 3: Clamp to frame boundaries per FR-023
+        x1_frame = max(0, min(x1_frame, frame_width))
+        y1_frame = max(0, min(y1_frame, frame_height))
+        x2_frame = max(0, min(x2_frame, frame_width))
+        y2_frame = max(0, min(y2_frame, frame_height))
+
+        # Skip invalid boxes after clamping
+        if x2_frame <= x1_frame or y2_frame <= y1_frame:
+            logger.debug(f"Skipping invalid box after mapping: ({x1_frame},{y1_frame},{x2_frame},{y2_frame})")
+            continue
+
+        # Create new Detection with mapped coordinates
+        mapped_detections.append(Detection(
+            class_id=det.class_id,
+            class_name=det.class_name,
+            confidence=det.confidence,
+            bbox=(x1_frame, y1_frame, x2_frame, y2_frame)
+        ))
+
+    logger.info(f"Mapped {len(mapped_detections)} detections to full frame coordinates")
+    return mapped_detections
+
+
 def run_inference(
     session: ort.InferenceSession,
     preprocessed_frame: np.ndarray
@@ -269,6 +412,101 @@ def render_bounding_boxes(
             frame,
             label,
             (x1, label_y),
+            font,
+            font_scale,
+            (255, 255, 255),
+            font_thickness,
+            cv2.LINE_AA
+        )
+
+    return frame
+
+
+def render_motion_boxes(
+    frame: np.ndarray,
+    motion_regions: List
+) -> np.ndarray:
+    """
+    Render motion region bounding boxes on frame.
+
+    Args:
+        frame: Frame in BGR format (modified in-place)
+        motion_regions: List of MotionRegion objects to render
+
+    Returns:
+        Frame with rendered motion boxes (same as input, modified in-place)
+    """
+    logger.debug(f"Rendering {len(motion_regions)} motion boxes on frame")
+
+    for region in motion_regions:
+        x, y, w, h = region.bounding_box
+        # Red color, thin line (1px) for motion regions (FR-025)
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 1)
+
+    return frame
+
+
+def render_tracking_boxes(
+    frame: np.ndarray,
+    tracked_objects: List
+) -> np.ndarray:
+    """
+    Render tracked object bounding boxes with IDs and states.
+
+    Args:
+        frame: Frame in BGR format (modified in-place)
+        tracked_objects: List of TrackedObject instances to render
+
+    Returns:
+        Frame with rendered tracking boxes (same as input, modified in-place)
+    """
+    logger.debug(f"Rendering {len(tracked_objects)} tracking boxes on frame")
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.5
+    font_thickness = 1
+    box_thickness = 2
+
+    for obj in tracked_objects:
+        x, y, w, h = obj.bounding_box
+
+        # Color based on state (FR-026, FR-027)
+        if obj.state.value == "stationary":
+            color = (0, 255, 255)  # Yellow for stationary objects
+        elif obj.state.value == "active":
+            color = (0, 255, 0)  # Green for active tracking
+        elif obj.state.value == "tentative":
+            color = (255, 165, 0)  # Orange for tentative tracks
+        else:  # lost
+            color = (128, 128, 128)  # Gray for lost tracks
+
+        # Draw bounding box
+        cv2.rectangle(frame, (x, y), (x+w, y+h), color, box_thickness)
+
+        # Create label: "{id_short} {class} ({state})"
+        id_short = str(obj.id).split('-')[0][:8]  # First 8 chars of UUID
+        label = f"{id_short} {obj.class_name} ({obj.state.value})"
+
+        # Draw label background
+        (text_w, text_h), baseline = cv2.getTextSize(
+            label, font, font_scale, font_thickness
+        )
+
+        # Position label above box if space, below if not
+        label_y = y - 5 if y - 5 > text_h else y + h + text_h + 5
+
+        cv2.rectangle(
+            frame,
+            (x, label_y - text_h - baseline),
+            (x + text_w, label_y + baseline),
+            color,
+            -1  # Filled
+        )
+
+        # Draw white text on colored background
+        cv2.putText(
+            frame,
+            label,
+            (x, label_y),
             font,
             font_scale,
             (255, 255, 255),
