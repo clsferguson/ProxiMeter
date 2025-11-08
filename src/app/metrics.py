@@ -158,6 +158,43 @@ gpu_memory_total_bytes = Gauge("gpu_memory_total_bytes", "GPU memory total", ["g
 gpu_temperature_celsius = Gauge("gpu_temperature_celsius", "GPU temperature", ["gpu_id", "backend"])
 
 # ============================================================================
+# Motion Detection Metrics (Feature 006, T067)
+# ============================================================================
+
+motion_detection_duration_seconds = Histogram(
+    "motion_detection_duration_seconds",
+    "Motion detection processing time per frame",
+    ["stream_id"],
+    buckets=(0.001, 0.005, 0.010, 0.015, 0.020, 0.025, 0.050, 0.100, 0.200)
+)
+
+yolo_inference_duration_seconds = Histogram(
+    "yolo_inference_duration_seconds",
+    "YOLO inference processing time per frame",
+    ["stream_id"],
+    buckets=(0.01, 0.025, 0.050, 0.100, 0.150, 0.200, 0.250, 0.500, 1.0)
+)
+
+tracking_duration_seconds = Histogram(
+    "tracking_duration_seconds",
+    "Object tracking processing time per frame",
+    ["stream_id"],
+    buckets=(0.001, 0.002, 0.005, 0.010, 0.015, 0.020, 0.025, 0.050)
+)
+
+tracked_objects_total = Gauge(
+    "tracked_objects_total",
+    "Currently tracked objects by state",
+    ["stream_id", "state"]
+)
+
+motion_regions_detected = Gauge(
+    "motion_regions_detected",
+    "Number of motion regions detected in current frame",
+    ["stream_id"]
+)
+
+# ============================================================================
 # System Health Metrics
 # ============================================================================
 

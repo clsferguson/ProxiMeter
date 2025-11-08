@@ -107,6 +107,7 @@ models/*.onnx
 # AI Agents
 .specify/
 .claude/
+CLAUDE.md
 artifacts/
 specs/
 .github/prompts/

@@ -4,3 +4,4 @@
 
 export { useStreams } from './useStreams'
 export { useApi, useFormSubmit } from './useApi'
+export { useStreamMetrics } from './useStreamMetrics'
