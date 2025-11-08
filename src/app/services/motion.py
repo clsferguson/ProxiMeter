@@ -178,11 +178,11 @@ class MotionDetector:
                 total_frames = len(self._motion_window)
                 motion_rate = motion_frames / total_frames
 
-                # Warn if >80% of frames have motion (possible false positive issue)
-                if motion_rate > 0.80:
+                # Warn if >50% of frames have motion (possible false positive issue)
+                if motion_rate > 0.50:
                     logger.warning(
                         f"High motion detection rate: {motion_rate*100:.1f}% of frames have motion "
-                        f"(threshold: 80%). This may indicate background subtractor misconfiguration, "
+                        f"(threshold: 50%). This may indicate background subtractor misconfiguration, "
                         f"constant scene changes, or camera instability. "
                         f"Motion frames: {motion_frames}/{total_frames}"
                     )
@@ -516,6 +516,7 @@ class ObjectTracker:
                     # Clean up Kalman tracker
                     kalman_id = str(evict_track.id)
                     if kalman_id in self._kalman_trackers:
+                        self._kalman_trackers[kalman_id].cleanup()  # Explicit resource cleanup
                         del self._kalman_trackers[kalman_id]
                     del self.tracks[evict_idx]
                 else:
@@ -565,6 +566,7 @@ class ObjectTracker:
             # Clean up Kalman tracker
             kalman_id = str(track.id)
             if kalman_id in self._kalman_trackers:
+                self._kalman_trackers[kalman_id].cleanup()  # Explicit resource cleanup
                 del self._kalman_trackers[kalman_id]
             del self.tracks[i]
 
@@ -599,6 +601,10 @@ class ObjectTracker:
 
     def reset(self):
         """Reset tracker state (clear all tracks)."""
+        # Clean up all Kalman trackers before clearing
+        for kalman in self._kalman_trackers.values():
+            kalman.cleanup()
+
         self.tracks.clear()
         self._kalman_trackers.clear()
         self.frame_count = 0

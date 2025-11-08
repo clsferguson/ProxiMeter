@@ -108,7 +108,7 @@ export function useStreamMetrics(options: UseStreamMetricsOptions): UseStreamMet
 
   const eventSourceRef = useRef<EventSource | null>(null)
   const reconnectAttemptsRef = useRef(0)
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const reconnectTimeoutRef = useRef<number | null>(null)
   const shouldConnectRef = useRef(autoConnect)
 
   // ============================================================================

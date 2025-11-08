@@ -14,7 +14,7 @@ Feature: 005-yolo-object-detection
 from fastapi import APIRouter, HTTPException, status
 from app.models.detection import YOLOConfig, CachedModel, StreamDetectionConfig
 from app.services.yolo import list_cached_models, delete_cached_model
-from app.config_io import load_streams, save_streams
+from app.config_io import load_streams, save_streams, atomic_config_update
 import os
 import logging
 from pathlib import Path
@@ -179,25 +179,22 @@ async def update_stream_detection_config(stream_id: str, detection_config: Strea
                 }
             )
 
-        config = load_streams()
-        streams = config.get("streams", [])
-
+        # Atomic read-modify-write to prevent race conditions
         stream_found = False
-        for stream in streams:
-            if stream.get("id") == stream_id:
-                stream["detection"] = detection_config.model_dump()
-                stream_found = True
-                break
+        with atomic_config_update() as config:
+            streams = config.get("streams", [])
 
-        if not stream_found:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Stream not found: {stream_id}"
-            )
+            for stream in streams:
+                if stream.get("id") == stream_id:
+                    stream["detection"] = detection_config.model_dump()
+                    stream_found = True
+                    break
 
-        # Save to config.yml
-        config["streams"] = streams
-        save_streams(config)
+            if not stream_found:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Stream not found: {stream_id}"
+                )
 
         # Apply changes immediately to running stream (if active)
         applied_immediately = False

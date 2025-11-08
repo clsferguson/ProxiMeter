@@ -537,24 +537,49 @@ class StreamsService:
 
                     # Step 2: Extract motion regions (T014)
                     # T081: Background subtractor error handling
+                    MAX_CONSECUTIVE_ERRORS = 50  # Stop stream after 50 consecutive errors (10s at 5 FPS)
                     try:
                         with motion_lock:  # FR-024, FR-031: atomic motion state access
                             motion_regions = motion_detector.extract_motion_regions(
                                 frame_bgr,
                                 timestamp=time.time()
                             )
+                        # Reset error count on success
+                        proc_data["motion_error_count"] = 0
+
                     except cv2.error as e:
+                        proc_data["motion_error_count"] += 1
                         logger.error(
-                            f"[{stream_id}] OpenCV background subtractor error: {e}. "
+                            f"[{stream_id}] OpenCV background subtractor error ({proc_data['motion_error_count']}/{MAX_CONSECUTIVE_ERRORS}): {e}. "
                             f"Frame shape: {frame_bgr.shape}, dtype: {frame_bgr.dtype}"
                         )
+
+                        # Stop stream if too many consecutive errors
+                        if proc_data["motion_error_count"] >= MAX_CONSECUTIVE_ERRORS:
+                            logger.critical(
+                                f"[{stream_id}] Stopping stream due to {MAX_CONSECUTIVE_ERRORS} consecutive motion detection errors"
+                            )
+                            asyncio.create_task(self.stop_stream(stream_id))
+                            break  # Exit frame processing loop
+
                         motion_regions = []  # Fallback: treat as no motion
+
                     except Exception as e:
+                        proc_data["motion_error_count"] += 1
                         logger.error(
-                            f"[{stream_id}] Motion detection error: {e}. "
+                            f"[{stream_id}] Motion detection error ({proc_data['motion_error_count']}/{MAX_CONSECUTIVE_ERRORS}): {e}. "
                             f"Frame shape: {frame_bgr.shape}, dtype: {frame_bgr.dtype}",
                             exc_info=True
                         )
+
+                        # Stop stream if too many consecutive errors
+                        if proc_data["motion_error_count"] >= MAX_CONSECUTIVE_ERRORS:
+                            logger.critical(
+                                f"[{stream_id}] Stopping stream due to {MAX_CONSECUTIVE_ERRORS} consecutive motion detection errors"
+                            )
+                            asyncio.create_task(self.stop_stream(stream_id))
+                            break  # Exit frame processing loop
+
                         motion_regions = []  # Fallback: treat as no motion
 
                     motion_time_ms = (time.perf_counter() - motion_start) * 1000
@@ -811,6 +836,7 @@ class StreamsService:
                 "last_motion_timestamp": None,  # For 300-second no-motion fallback (T016)
                 "object_tracker": object_tracker,  # T039
                 "frame_count": 0,  # T039: Frame counter for tracking
+                "motion_error_count": 0,  # Track consecutive motion detection errors
             }
 
             # Start subprocess
@@ -1092,11 +1118,30 @@ class StreamsService:
 
         width, height = dimensions
         frame_size = width * height * 3  # BGR = 3 bytes per pixel
+
+        # Sanity check: Prevent buffer overflow from malformed dimensions
+        # 4K = 3840x2160x3 = 24,883,200 bytes (~25MB), so cap at 30MB
+        MAX_FRAME_SIZE = 30 * 1024 * 1024  # 30MB
+        if frame_size > MAX_FRAME_SIZE:
+            logger.error(
+                f"[{stream_id}] Frame size {frame_size} bytes exceeds maximum {MAX_FRAME_SIZE} bytes. "
+                f"Dimensions {width}x{height} may be incorrect. Stopping stream."
+            )
+            return (False, b'')
+
         logger.debug(f"[{stream_id}] Reading raw BGR24 frame: {width}x{height} = {frame_size} bytes")
 
         # Read raw frame bytes
         read_start = time.perf_counter()
         while len(buffer) < frame_size:
+            # Additional safety: check buffer doesn't exceed expected size during accumulation
+            if len(buffer) > MAX_FRAME_SIZE:
+                logger.error(
+                    f"[{stream_id}] Buffer overflow during frame read: {len(buffer)} bytes exceeds {MAX_FRAME_SIZE}. "
+                    "FFmpeg may be producing malformed output."
+                )
+                return (False, b'')
+
             try:
                 chunk = await asyncio.wait_for(
                     process.stdout.read(frame_size - len(buffer)),

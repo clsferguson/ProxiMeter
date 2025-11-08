@@ -150,6 +150,21 @@ class KalmanTracker:
         """
         return (float(self.state[4]), float(self.state[5]))
 
+    def cleanup(self):
+        """
+        Explicitly release NumPy array resources.
+
+        Called before tracker deletion to ensure proper cleanup.
+        Sets all arrays to None to allow garbage collection.
+        """
+        logger.debug("Cleaning up KalmanTracker resources")
+        self.state = None
+        self.covariance = None
+        self.F = None
+        self.H = None
+        self.Q = None
+        self.R = None
+
 
 def compute_iou(bbox1: Tuple[int, int, int, int], bbox2: Tuple[int, int, int, int]) -> float:
     """

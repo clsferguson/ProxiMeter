@@ -137,6 +137,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             from .services.yolo import create_onnx_session
             try:
                 onnx_session = create_onnx_session(model_path, gpu_backend_env, fail_fast=False)
+
+                # Validate YOLO_IMAGE_SIZE matches ONNX model input shape
+                input_shape = onnx_session.get_inputs()[0].shape
+                if len(input_shape) == 4:  # Expected: [batch, channels, height, width]
+                    model_height, model_width = input_shape[2], input_shape[3]
+                    if model_height != yolo_size or model_width != yolo_size:
+                        logger.error(
+                            f"YOLO_IMAGE_SIZE mismatch! YOLO_IMAGE_SIZE={yolo_size} "
+                            f"but ONNX model expects {model_width}x{model_height}. "
+                            f"Model file: {model_path}"
+                        )
+                        raise ValueError(
+                            f"YOLO_IMAGE_SIZE ({yolo_size}) doesn't match ONNX model "
+                            f"input shape ({model_width}x{model_height})"
+                        )
+                    logger.info(f"ONNX model input shape validated: {model_width}x{model_height}")
+
                 detection.set_onnx_session(onnx_session)
                 logger.info(f"ONNX Runtime session initialized: {model_path}")
             except Exception as e:
@@ -201,16 +218,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 ]
                 
                 results = await asyncio.gather(*stop_tasks, return_exceptions=True)
-                
+
                 # Count successes/failures
-                errors = [r for r in results if isinstance(r, Exception)]
-                successful = len(results) - len(errors)
-                
-                if errors:
-                    logger.error(f"Failed to stop {len(errors)}/{len(results)} stream(s)")
-                    for idx, error in enumerate(errors, 1):
-                        logger.error(f"  Stream {idx}: {error}")
-                
+                failed_indices = [i for i, r in enumerate(results) if isinstance(r, Exception)]
+                successful = len(results) - len(failed_indices)
+
+                if failed_indices:
+                    logger.error(f"Failed to gracefully stop {len(failed_indices)}/{len(results)} stream(s)")
+                    for idx, result_idx in enumerate(failed_indices, 1):
+                        logger.error(f"  Stream {idx}: {results[result_idx]}")
+
+                    # SIGKILL fallback for stuck processes
+                    logger.warning(f"Attempting force-kill of {len(failed_indices)} stuck stream(s)")
+                    for result_idx in failed_indices:
+                        stream_id = running[result_idx]["id"]
+                        proc_data = container.streams_service.active_processes.get(stream_id)
+                        if proc_data and proc_data.get("process"):
+                            try:
+                                proc = proc_data["process"]
+                                if proc.returncode is None:  # Still running
+                                    logger.warning(f"Force-killing FFmpeg for stream {stream_id}")
+                                    proc.kill()  # SIGKILL
+                                    await proc.wait()  # Wait for process to die
+                                    logger.info(f"Force-killed stream {stream_id}")
+                            except Exception as kill_err:
+                                logger.error(f"Force-kill failed for {stream_id}: {kill_err}")
+
                 if successful > 0:
                     logger.info(f"Stopped {successful} stream(s)")
                 

@@ -34,8 +34,9 @@ import logging
 import os
 import tempfile
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Iterator
 
 import yaml
 
@@ -75,6 +76,34 @@ def _initialize_config_file() -> None:
     if not _DRY_RUN_MODE:
         logger.info(f"Initializing config: {CONFIG_PATH}")
         save_streams({STREAMS_KEY: []})
+
+
+# ============================================================================
+# Atomic Read-Modify-Write Context Manager
+# ============================================================================
+
+@contextmanager
+def atomic_config_update() -> Iterator[dict[str, Any]]:
+    """Context manager for atomic read-modify-write operations.
+
+    Usage:
+        with atomic_config_update() as config:
+            # Modify config
+            config["streams"].append(new_stream)
+            # Changes are automatically saved on context exit
+
+    This prevents race conditions by holding the lock during the entire
+    read-modify-write sequence.
+    """
+    with _config_lock:
+        # Load config while holding lock
+        config = load_streams()
+
+        # Yield to caller for modifications
+        yield config
+
+        # Save config while still holding lock
+        save_streams(config)
 
 
 # ============================================================================
