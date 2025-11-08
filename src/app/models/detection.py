@@ -133,8 +133,8 @@ class StreamDetectionConfig(BaseModel):
     )
 
     min_confidence: float = Field(
-        default=0.7,
-        description="Minimum confidence threshold for displaying detections",
+        default=0.8,
+        description="Minimum confidence threshold for displaying detections (increased from 0.7 to reduce false positives)",
         ge=0.0,
         le=1.0,
         multiple_of=0.01

@@ -561,7 +561,7 @@ class StreamsService:
 
                     detection_config = proc_data.get("detection_config", {})
                     enabled_labels = detection_config.get("enabled_labels", ["person"])
-                    min_confidence = detection_config.get("min_confidence", 0.7)
+                    min_confidence = detection_config.get("min_confidence", 0.8)
 
                     # Get YOLO model image size
                     yolo_config = get_yolo_config_singleton()
@@ -1265,7 +1265,7 @@ class StreamsService:
 
             detection_config = proc_data.get("detection_config", {})
             enabled_labels = detection_config.get("enabled_labels", ["person"])
-            min_confidence = detection_config.get("min_confidence", 0.7)
+            min_confidence = detection_config.get("min_confidence", 0.8)
             logger.debug(f"[{stream_id}] Detection config: labels={enabled_labels}, min_conf={min_confidence}")
 
             # Get YOLO model image size (must match ONNX model input dimensions)

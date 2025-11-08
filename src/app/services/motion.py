@@ -357,7 +357,7 @@ class ObjectTracker:
         max_age: int = 30,
         min_hits: int = 3,
         iou_threshold: float = 0.3,
-        max_tracks: int = 50
+        max_tracks: int = 15
     ):
         """
         Initialize object tracker.
@@ -367,6 +367,7 @@ class ObjectTracker:
             min_hits: Minimum detection matches to confirm track (3 detections)
             iou_threshold: Minimum IoU for detection-to-track matching
             max_tracks: Maximum number of tracked objects per stream (T082: memory limit enforcement)
+                       Reduced from 50 to 15 for single-camera deployments to prevent duplicate track overflow
         """
         self.tracks: List[TrackedObject] = []
         self.max_age = max_age

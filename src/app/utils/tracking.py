@@ -80,7 +80,6 @@ class KalmanTracker:
         # Covariance prediction: P = F @ P @ F.T + Q
         self.covariance = self.F @ self.covariance @ self.F.T + self.Q
 
-        logger.debug(f"Kalman predict: state={self.state[:4]}, velocity={self.state[4:]}")
         return self.state
 
     def update(self, measurement: Tuple[int, int, int, int]):
@@ -111,8 +110,6 @@ class KalmanTracker:
             # Update covariance: P = (I - K @ H) @ P
             I_KH = np.eye(6, dtype=np.float32) - K @ self.H
             self.covariance = I_KH @ self.covariance
-
-            logger.debug(f"Kalman update: measurement={measurement}, updated_state={self.state[:4]}")
 
         except np.linalg.LinAlgError as e:
             # Singular covariance matrix - reset tracker to measurement

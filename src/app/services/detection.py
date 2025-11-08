@@ -325,28 +325,146 @@ def parse_detections(
     return detections
 
 
+def calculate_iou(box1: Tuple[int, int, int, int], box2: Tuple[int, int, int, int]) -> float:
+    """
+    Calculate Intersection over Union (IoU) between two bounding boxes.
+
+    Args:
+        box1: First bounding box (x1, y1, x2, y2)
+        box2: Second bounding box (x1, y1, x2, y2)
+
+    Returns:
+        IoU value between 0.0 and 1.0
+    """
+    x1_1, y1_1, x2_1, y2_1 = box1
+    x1_2, y1_2, x2_2, y2_2 = box2
+
+    # Calculate intersection area
+    x1_inter = max(x1_1, x1_2)
+    y1_inter = max(y1_1, y1_2)
+    x2_inter = min(x2_1, x2_2)
+    y2_inter = min(y2_1, y2_2)
+
+    # Check if boxes intersect
+    if x2_inter <= x1_inter or y2_inter <= y1_inter:
+        return 0.0
+
+    intersection = (x2_inter - x1_inter) * (y2_inter - y1_inter)
+
+    # Calculate union area
+    area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+    area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+    union = area1 + area2 - intersection
+
+    # Avoid division by zero
+    if union == 0:
+        return 0.0
+
+    return intersection / union
+
+
+def apply_nms(
+    detections: List[Detection],
+    iou_threshold: float = 0.5
+) -> List[Detection]:
+    """
+    Apply Non-Maximum Suppression to remove duplicate/overlapping detections.
+
+    NMS Algorithm:
+    1. Sort detections by confidence (descending)
+    2. For each detection, suppress all lower-confidence detections
+       that overlap with it (IoU > threshold)
+    3. Process separately for each class to preserve multi-class detections
+
+    Args:
+        detections: List of Detection objects
+        iou_threshold: IoU threshold for suppression (default: 0.5)
+
+    Returns:
+        Filtered list of Detection objects with duplicates removed
+    """
+    if not detections:
+        return []
+
+    # Group detections by class to apply NMS separately per class
+    detections_by_class: dict[str, List[Detection]] = {}
+    for det in detections:
+        if det.class_name not in detections_by_class:
+            detections_by_class[det.class_name] = []
+        detections_by_class[det.class_name].append(det)
+
+    kept_detections = []
+    suppressed_count = 0
+
+    # Apply NMS for each class independently
+    for class_name, class_dets in detections_by_class.items():
+        # Sort by confidence (descending)
+        class_dets_sorted = sorted(class_dets, key=lambda d: d.confidence, reverse=True)
+
+        # Track which detections to keep
+        keep_flags = [True] * len(class_dets_sorted)
+
+        for i in range(len(class_dets_sorted)):
+            if not keep_flags[i]:
+                continue
+
+            # Compare with all subsequent detections
+            for j in range(i + 1, len(class_dets_sorted)):
+                if not keep_flags[j]:
+                    continue
+
+                # Calculate IoU between boxes
+                iou = calculate_iou(class_dets_sorted[i].bbox, class_dets_sorted[j].bbox)
+
+                # Suppress lower confidence detection if IoU exceeds threshold
+                if iou > iou_threshold:
+                    keep_flags[j] = False
+                    suppressed_count += 1
+
+        # Keep only non-suppressed detections
+        for i, det in enumerate(class_dets_sorted):
+            if keep_flags[i]:
+                kept_detections.append(det)
+
+    if suppressed_count > 0:
+        logger.info(f"NMS suppressed {suppressed_count} duplicate detections (IoU threshold: {iou_threshold})")
+
+    return kept_detections
+
+
 def filter_detections(
     detections: List[Detection],
     enabled_labels: List[str],
-    min_confidence: float
+    min_confidence: float,
+    apply_nms_filter: bool = True,
+    nms_iou_threshold: float = 0.5
 ) -> List[Detection]:
     """
-    Filter detections by label and confidence threshold.
+    Filter detections by label, confidence threshold, and NMS.
 
     Args:
         detections: List of Detection objects
         enabled_labels: List of allowed COCO class names
         min_confidence: Minimum confidence threshold (0.0-1.0)
+        apply_nms_filter: Whether to apply NMS (default: True)
+        nms_iou_threshold: IoU threshold for NMS (default: 0.5)
 
     Returns:
         Filtered list of Detection objects
     """
     logger.debug(f"Filtering detections: input_count={len(detections)}, enabled_labels={enabled_labels}, min_confidence={min_confidence}")
 
+    # Step 1: Filter by label and confidence
     filtered = [
         det for det in detections
         if det.class_name in enabled_labels and det.confidence >= min_confidence
     ]
+
+    # Step 2: Apply NMS to remove duplicates
+    if apply_nms_filter and filtered:
+        pre_nms_count = len(filtered)
+        filtered = apply_nms(filtered, nms_iou_threshold)
+        logger.debug(f"NMS: {pre_nms_count} detections → {len(filtered)} detections")
 
     if filtered:
         class_counts = {}
