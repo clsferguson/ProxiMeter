@@ -778,8 +778,14 @@ class StreamsService:
                             render_motion_boxes(frame_bgr, motion_regions)
 
                         # Layer 3: Tracking boxes (green/yellow, with IDs) - conditional (T060-T061)
+                        # Filter to only show ACTIVE and STATIONARY tracks (not TENTATIVE or LOST)
                         if show_tracking and tracked_objects:
-                            render_tracking_boxes(frame_bgr, tracked_objects)
+                            visible_tracks = [
+                                obj for obj in tracked_objects
+                                if obj.state in (ObjectState.ACTIVE, ObjectState.STATIONARY)
+                            ]
+                            if visible_tracks:
+                                render_tracking_boxes(frame_bgr, visible_tracks)
 
                         proc_data["latest_frame"] = frame_bgr
                         proc_data["latest_frame_time"] = time.time()

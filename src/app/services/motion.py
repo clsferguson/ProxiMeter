@@ -472,10 +472,54 @@ class ObjectTracker:
             det_indices, track_indices = hungarian_matching(cost_matrix)
 
             # Filter matches by IoU threshold
+            filtered_matches = []
             for det_idx, track_idx in zip(det_indices, track_indices):
-                if iou_matrix[det_idx, track_idx] >= self.iou_threshold:
+                iou_value = iou_matrix[det_idx, track_idx]
+                if iou_value >= self.iou_threshold:
                     matched_det_indices.append(det_idx)
                     matched_track_indices.append(track_idx)
+                else:
+                    # Log why this match was rejected
+                    filtered_matches.append((det_idx, track_idx, iou_value))
+
+            # Log rejected matches for debugging
+            if filtered_matches and len(matched_det_indices) == 0:
+                logger.debug(
+                    f"All IoU matches rejected (threshold={self.iou_threshold}): " +
+                    ", ".join([f"det{d}→track{t}(IoU={iou:.3f})" for d, t, iou in filtered_matches[:3]])
+                )
+
+        # Fallback matching: If no IoU matches found, try center-point distance matching
+        # This helps when bounding boxes shift due to different region crops
+        if len(matched_det_indices) == 0 and detection_bboxes and predicted_bboxes:
+            logger.debug("IoU matching failed (0 matches), trying center-point distance fallback")
+
+            # Compute center-point distance matrix
+            distance_matrix = np.zeros((len(detection_bboxes), len(predicted_bboxes)))
+            for det_idx, det_bbox in enumerate(detection_bboxes):
+                det_cx = det_bbox[0] + det_bbox[2] / 2
+                det_cy = det_bbox[1] + det_bbox[3] / 2
+
+                for track_idx, track_bbox in enumerate(predicted_bboxes):
+                    track_cx = track_bbox[0] + track_bbox[2] / 2
+                    track_cy = track_bbox[1] + track_bbox[3] / 2
+
+                    distance = np.sqrt((det_cx - track_cx)**2 + (det_cy - track_cy)**2)
+                    distance_matrix[det_idx, track_idx] = distance
+
+            # Use Hungarian algorithm on distance matrix
+            det_indices, track_indices = hungarian_matching(distance_matrix)
+
+            # Accept matches within 50 pixels (reasonable for 320x240 frame)
+            max_distance = 50
+            for det_idx, track_idx in zip(det_indices, track_indices):
+                if distance_matrix[det_idx, track_idx] <= max_distance:
+                    matched_det_indices.append(det_idx)
+                    matched_track_indices.append(track_idx)
+                    logger.debug(
+                        f"Fallback match: detection {det_idx} → track {track_idx}, "
+                        f"distance={distance_matrix[det_idx, track_idx]:.1f}px"
+                    )
 
         logger.debug(f"Matching: {len(matched_det_indices)} matches, {len(detections)} detections, {len(self.tracks)} tracks")
 
@@ -593,8 +637,9 @@ class ObjectTracker:
                 # Delete LOST tracks quickly (5 frames = 1 second)
                 max_age_for_state = 5
             elif track.state == ObjectState.TENTATIVE:
-                # Delete TENTATIVE tracks moderately fast (15 frames = 3 seconds)
-                max_age_for_state = 15
+                # Delete TENTATIVE tracks quickly (5 frames = 1 second) to reduce clutter
+                # Reduced from 15 frames to prevent accumulation of unmatched tracks
+                max_age_for_state = 5
             elif track.state == ObjectState.STATIONARY:
                 # Keep STATIONARY tracks longer to survive 50-frame detection interval
                 max_age_for_state = 60
