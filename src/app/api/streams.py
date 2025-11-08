@@ -529,29 +529,37 @@ async def stop_stream(
 @router.get("/{stream_id}/mjpeg")
 async def stream_mjpeg(
     stream_id: str,
+    show_motion: bool = True,
+    show_tracking: bool = True,
     service: StreamsService = Depends(get_streams_service)
 ) -> StreamingResponse:
-    """Stream MJPEG video at 5fps (constitution-mandated cap)."""
+    """Stream MJPEG video at 5fps with optional visualization layers (T058-T061).
+
+    Args:
+        stream_id: Stream identifier
+        show_motion: Show red boxes around motion regions (default: True)
+        show_tracking: Show green/yellow boxes with IDs for tracked objects (default: True)
+    """
     stream = await service.get_stream(stream_id)
     if not stream:
         logger.warning(f"MJPEG failed - not found: {stream_id}")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stream not found")
-    
+
     if stream["status"] != "running":
         logger.warning(f"MJPEG failed - not running: {stream_id}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Stream must be started first"
         )
-    
-    logger.info(f"Starting MJPEG stream: {stream_id}")
-    
+
+    logger.info(f"Starting MJPEG stream: {stream_id} (motion={show_motion}, tracking={show_tracking})")
+
     async def generate_frames():
         """Generate MJPEG multipart stream at locked 5fps."""
         frame_count = 0  # Initialize before try block
 
-        # Register viewer connection (B1, B2 fix)
-        service.register_mjpeg_viewer(stream_id)
+        # Register viewer connection with visualization preferences (B1, B2 fix + T058-T061)
+        service.register_mjpeg_viewer(stream_id, show_motion=show_motion, show_tracking=show_tracking)
 
         try:
             frame_interval = 1.0 / FPS

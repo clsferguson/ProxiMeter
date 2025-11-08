@@ -14,17 +14,24 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import { AlertCircle, ArrowLeft, Activity, Video, RefreshCw } from 'lucide-react'
 import { useStreams } from '@/hooks/useStreams'
 import { API_BASE_URL } from '@/lib/constants'
 import type { StreamResponse } from '@/lib/types'
+import { MotionMetrics } from '@/components/MotionMetrics'
 
 export default function PlayStream() {
   const { streamId } = useParams<{ streamId: string }>()
   const navigate = useNavigate()
   const { streams, isLoading, error } = useStreams()
-  
+
   const [imageError, setImageError] = useState(false)
+
+  // T054-T055: Visualization toggle state
+  const [showMotionBoxes, setShowMotionBoxes] = useState(true)
+  const [showTrackingBoxes, setShowTrackingBoxes] = useState(true)
 
   const stream = useMemo<StreamResponse | null>(() => {
     if (!streamId || streams.length === 0) return null
@@ -35,11 +42,15 @@ export default function PlayStream() {
   const handleImageError = useCallback(() => setImageError(true), [])
   const handleRetry = useCallback(() => setImageError(false), [])
 
-  // MJPEG stream URL - continuous live stream
+  // MJPEG stream URL - continuous live stream with visualization toggles (T058)
   const streamUrl = useMemo(() => {
     if (!stream || stream.status !== 'running') return null
-    return `${API_BASE_URL}/streams/${stream.id}/mjpeg`
-  }, [stream])
+    const params = new URLSearchParams({
+      show_motion: showMotionBoxes.toString(),
+      show_tracking: showTrackingBoxes.toString()
+    })
+    return `${API_BASE_URL}/streams/${stream.id}/mjpeg?${params.toString()}`
+  }, [stream, showMotionBoxes, showTrackingBoxes])
 
   if (isLoading) {
     return (
@@ -164,6 +175,57 @@ export default function PlayStream() {
             )}
           </CardContent>
         </Card>
+
+        {/* T058-T061: Visualization Toggle Controls */}
+        {stream.status === 'running' && (
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle>Visualization Controls</CardTitle>
+              <CardDescription>
+                Toggle visualization layers on the live stream
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="motion-toggle" className="text-base">
+                      Motion Regions
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      Show red boxes around detected motion areas
+                    </p>
+                  </div>
+                  <Switch
+                    id="motion-toggle"
+                    checked={showMotionBoxes}
+                    onCheckedChange={setShowMotionBoxes}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="tracking-toggle" className="text-base">
+                      Object Tracking
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      Show green/yellow boxes with IDs for tracked objects
+                    </p>
+                  </div>
+                  <Switch
+                    id="tracking-toggle"
+                    checked={showTrackingBoxes}
+                    onCheckedChange={setShowTrackingBoxes}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Motion Detection Metrics (T076) */}
+        {stream.status === 'running' && streamId && (
+          <MotionMetrics streamId={streamId} />
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Card>

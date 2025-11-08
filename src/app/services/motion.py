@@ -609,3 +609,27 @@ class ObjectTracker:
         self._kalman_trackers.clear()
         self.frame_count = 0
         logger.info("ObjectTracker reset: all tracks cleared")
+
+    def get_active_objects(self) -> List[TrackedObject]:
+        """Get all tracked objects that are not stationary.
+
+        Returns objects in TENTATIVE, ACTIVE, and LOST states.
+        Used for identifying objects that need full-frequency detection.
+
+        Returns:
+            List of TrackedObject instances with state != STATIONARY
+        """
+        from ..models.motion import ObjectState
+        return [track for track in self.tracks if track.state != ObjectState.STATIONARY]
+
+    def get_stationary_objects(self) -> List[TrackedObject]:
+        """Get all tracked objects that are stationary.
+
+        Returns objects in STATIONARY state that should receive
+        reduced-frequency detection (1 frame per 50 = every 10 seconds at 5 FPS).
+
+        Returns:
+            List of TrackedObject instances with state == STATIONARY
+        """
+        from ..models.motion import ObjectState
+        return [track for track in self.tracks if track.state == ObjectState.STATIONARY]

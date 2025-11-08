@@ -90,7 +90,9 @@ class StreamsService:
         """
         self.active_processes: dict[str, dict[str, Any]] = {}
         self.active_processes_lock = asyncio.Lock()
-        self.active_mjpeg_viewers: dict[str, int] = {}  # {stream_id: viewer_count}
+        # T058-T061: Track viewer preferences for visualization toggles
+        # {stream_id: {"count": int, "show_motion": bool, "show_tracking": bool}}
+        self.active_mjpeg_viewers: dict[str, dict[str, Any]] = {}
         self.gpu_backend = get_gpu_backend()
 
         if self.gpu_backend == "none":
@@ -102,24 +104,68 @@ class StreamsService:
     # MJPEG Viewer Tracking
     # ========================================================================
 
-    def register_mjpeg_viewer(self, stream_id: str) -> None:
-        """Register an MJPEG viewer connection for conditional rendering."""
-        self.active_mjpeg_viewers[stream_id] = self.active_mjpeg_viewers.get(stream_id, 0) + 1
-        logger.info(f"[{stream_id}] MJPEG viewer connected (total: {self.active_mjpeg_viewers[stream_id]})")
+    def register_mjpeg_viewer(
+        self,
+        stream_id: str,
+        show_motion: bool = True,
+        show_tracking: bool = True
+    ) -> None:
+        """Register an MJPEG viewer connection with visualization preferences (T058-T061).
+
+        Args:
+            stream_id: Stream identifier
+            show_motion: Show red boxes around motion regions
+            show_tracking: Show green/yellow boxes with IDs for tracked objects
+        """
+        if stream_id not in self.active_mjpeg_viewers:
+            self.active_mjpeg_viewers[stream_id] = {
+                "count": 0,
+                "show_motion": show_motion,
+                "show_tracking": show_tracking
+            }
+
+        self.active_mjpeg_viewers[stream_id]["count"] += 1
+        # Update preferences to latest viewer's settings
+        self.active_mjpeg_viewers[stream_id]["show_motion"] = show_motion
+        self.active_mjpeg_viewers[stream_id]["show_tracking"] = show_tracking
+
+        logger.info(
+            f"[{stream_id}] MJPEG viewer connected "
+            f"(total: {self.active_mjpeg_viewers[stream_id]['count']}, "
+            f"motion={show_motion}, tracking={show_tracking})"
+        )
 
     def unregister_mjpeg_viewer(self, stream_id: str) -> None:
         """Unregister an MJPEG viewer connection."""
         if stream_id in self.active_mjpeg_viewers:
-            self.active_mjpeg_viewers[stream_id] -= 1
-            if self.active_mjpeg_viewers[stream_id] <= 0:
+            self.active_mjpeg_viewers[stream_id]["count"] -= 1
+            if self.active_mjpeg_viewers[stream_id]["count"] <= 0:
                 del self.active_mjpeg_viewers[stream_id]
                 logger.info(f"[{stream_id}] Last MJPEG viewer disconnected")
             else:
-                logger.info(f"[{stream_id}] MJPEG viewer disconnected (remaining: {self.active_mjpeg_viewers[stream_id]})")
+                logger.info(
+                    f"[{stream_id}] MJPEG viewer disconnected "
+                    f"(remaining: {self.active_mjpeg_viewers[stream_id]['count']})"
+                )
 
     def has_mjpeg_viewers(self, stream_id: str) -> bool:
         """Check if stream has active MJPEG viewers."""
-        return self.active_mjpeg_viewers.get(stream_id, 0) > 0
+        viewer_data = self.active_mjpeg_viewers.get(stream_id)
+        return viewer_data is not None and viewer_data.get("count", 0) > 0
+
+    def get_viewer_preferences(self, stream_id: str) -> tuple[bool, bool]:
+        """Get visualization preferences for stream viewers (T058-T061).
+
+        Returns:
+            Tuple of (show_motion, show_tracking). Defaults to (True, True) if no viewers.
+        """
+        viewer_data = self.active_mjpeg_viewers.get(stream_id)
+        if viewer_data is None:
+            return (True, True)
+        return (
+            viewer_data.get("show_motion", True),
+            viewer_data.get("show_tracking", True)
+        )
 
     # ========================================================================
     # Stream Retrieval
@@ -584,20 +630,45 @@ class StreamsService:
 
                     motion_time_ms = (time.perf_counter() - motion_start) * 1000
 
-                    # Step 3: Region-based YOLO inference (T015)
+                    # Step 3: Collect regions for YOLO inference (T015 + T048-T050)
+                    # Regions include: (1) motion regions, (2) stationary object regions (at reduced frequency)
                     yolo_start = time.perf_counter()
+                    regions_to_process = []
+
+                    # 3a: Add motion regions
                     if motion_regions:
                         # Update last motion timestamp
                         proc_data["last_motion_timestamp"] = time.time()
-
                         logger.debug(f"[{stream_id}] {len(motion_regions)} motion regions detected")
 
-                        # Run YOLO on each motion region
+                        # Add all motion regions to processing list
                         for region in motion_regions:
+                            regions_to_process.append(("motion", region.bounding_box, region.width, region.height))
+
+                    # 3b: Add stationary object regions (T048-T050)
+                    # Check if stationary objects need detection (every 50 frames = 10 seconds at 5 FPS)
+                    current_frame = proc_data.get("frame_count", 0)
+                    if object_tracker:
+                        stationary_objects = object_tracker.get_stationary_objects()
+                        for track in stationary_objects:
+                            if track.should_run_detection(current_frame):
+                                # Add stationary object bounding box as a region
+                                x, y, w, h = track.bounding_box
+                                regions_to_process.append(("stationary", (x, y, w, h), w, h))
+                                logger.debug(
+                                    f"[{stream_id}] Adding stationary object {track.id.hex[:8]} "
+                                    f"for reduced-frequency detection (frame {current_frame})"
+                                )
+
+                    # 3c: Run YOLO on all collected regions
+                    if regions_to_process:
+                        logger.debug(f"[{stream_id}] Processing {len(regions_to_process)} regions (motion + stationary)")
+
+                        for region_type, bbox, region_w, region_h in regions_to_process:
                             # Preprocess region
                             preprocessed, scale, padding, region_offset = preprocess_region(
                                 frame_bgr,
-                                region.bounding_box,
+                                bbox,
                                 target_size=target_size
                             )
 
@@ -607,10 +678,10 @@ class StreamsService:
                             # Parse detections in region space
                             region_detections = parse_detections(
                                 outputs, scale, padding,
-                                (region.height, region.width)
+                                (region_h, region_w)
                             )
 
-                            # Map back to full frame coordinates (T015)
+                            # Map back to full frame coordinates
                             frame_detections = map_detections_to_frame(
                                 region_detections,
                                 scale, padding, region_offset,
@@ -619,7 +690,8 @@ class StreamsService:
 
                             all_detections.extend(frame_detections)
 
-                    else:
+                    # 3d: No-motion fallback (only if no motion AND no stationary objects to process)
+                    if not regions_to_process:
                         # Step 4: No-motion fallback logic (T016)
                         # Run full-frame detection after 300 seconds (5 min) of no motion
                         current_time = time.time()
@@ -688,16 +760,19 @@ class StreamsService:
                     # Conditional rendering based on viewer presence (B6 optimization, T059-T061)
                     has_viewers = self.has_mjpeg_viewers(stream_id)
                     if has_viewers:
-                        # Render all visualization layers when viewers are watching (T059-T061)
-                        # Layer 1: Original YOLO detections (existing functionality)
+                        # Get viewer visualization preferences (T058-T061)
+                        show_motion, show_tracking = self.get_viewer_preferences(stream_id)
+
+                        # Render visualization layers based on preferences
+                        # Layer 1: Original YOLO detections (always shown)
                         render_bounding_boxes(frame_bgr, filtered_detections)
 
-                        # Layer 2: Motion boxes (red, thin) (T059)
-                        if motion_regions:
+                        # Layer 2: Motion boxes (red, thin) - conditional (T059)
+                        if show_motion and motion_regions:
                             render_motion_boxes(frame_bgr, motion_regions)
 
-                        # Layer 3: Tracking boxes (green/yellow, with IDs) (T060-T061)
-                        if tracked_objects:
+                        # Layer 3: Tracking boxes (green/yellow, with IDs) - conditional (T060-T061)
+                        if show_tracking and tracked_objects:
                             render_tracking_boxes(frame_bgr, tracked_objects)
 
                         proc_data["latest_frame"] = frame_bgr
