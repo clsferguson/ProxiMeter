@@ -155,7 +155,15 @@ class MotionDetector:
         nms_bboxes = self._apply_nms(merged_bboxes)
         logger.debug(f"After NMS: {len(nms_bboxes)} regions (iou_threshold={self.nms_iou_threshold})")
 
-        # Step 8: Add 15% padding with boundary clipping per FR-004
+        # Step 8: Limit max regions per frame (Frigate optimization - prevent processing too many regions)
+        MAX_REGIONS = 3  # Process at most 3 regions per frame
+        if len(nms_bboxes) > MAX_REGIONS:
+            # Sort by area (descending) and keep top 3 largest
+            nms_bboxes_sorted = sorted(nms_bboxes, key=lambda b: b[4], reverse=True)  # b[4] is area
+            nms_bboxes = nms_bboxes_sorted[:MAX_REGIONS]
+            logger.debug(f"Limited to {MAX_REGIONS} largest regions (Frigate optimization)")
+
+        # Step 9: Add 15% padding with boundary clipping per FR-004
         motion_regions = []
         for (x, y, w, h, area, merged_count) in nms_bboxes:
             # Calculate 15% padding based on max dimension per FR-004
@@ -166,6 +174,18 @@ class MotionDetector:
             y_padded = max(0, y - padding)
             w_padded = min(frame_width - x_padded, w + 2 * padding)
             h_padded = min(frame_height - y_padded, h + 2 * padding)
+
+            # Skip full-frame regions after padding (Frigate optimization)
+            # Check if padded bbox is >90% of frame width OR height
+            bbox_width_ratio = w_padded / frame_width
+            bbox_height_ratio = h_padded / frame_height
+            if bbox_width_ratio > 0.9 or bbox_height_ratio > 0.9:
+                logger.debug(
+                    f"Skipping full-frame region after padding: "
+                    f"bbox=({x_padded},{y_padded},{w_padded},{h_padded}), "
+                    f"coverage=({bbox_width_ratio*100:.1f}% width, {bbox_height_ratio*100:.1f}% height)"
+                )
+                continue
 
             motion_regions.append(
                 MotionRegion(
@@ -565,12 +585,30 @@ class ObjectTracker:
             track.age += 1
             track.update_state()
 
-        # Step 7: Delete old tracks (max_age exceeded)
+        # Step 7: Delete old tracks (state-based max_age - Frigate optimization)
         tracks_to_delete = []
         for i, track in enumerate(self.tracks):
-            if track.frames_since_detection > self.max_age:
+            # State-based aging to reduce clutter and improve responsiveness
+            if track.state == ObjectState.LOST:
+                # Delete LOST tracks quickly (5 frames = 1 second)
+                max_age_for_state = 5
+            elif track.state == ObjectState.TENTATIVE:
+                # Delete TENTATIVE tracks moderately fast (15 frames = 3 seconds)
+                max_age_for_state = 15
+            elif track.state == ObjectState.STATIONARY:
+                # Keep STATIONARY tracks longer to survive 50-frame detection interval
+                max_age_for_state = 60
+            else:  # ACTIVE
+                # Keep ACTIVE tracks for moderate time (30 frames = 6 seconds)
+                max_age_for_state = 30
+
+            if track.frames_since_detection > max_age_for_state:
                 tracks_to_delete.append(i)
-                logger.info(f"Track deleted: id={track.id.hex[:8]}, age={track.age}, no detection for {track.frames_since_detection} frames")
+                logger.info(
+                    f"Track deleted: id={track.id.hex[:8]}, state={track.state.value}, "
+                    f"age={track.age}, no detection for {track.frames_since_detection} frames "
+                    f"(max_age={max_age_for_state})"
+                )
 
         # Remove in reverse order to preserve indices
         for i in sorted(tracks_to_delete, reverse=True):
