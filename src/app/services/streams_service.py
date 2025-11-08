@@ -635,6 +635,9 @@ class StreamsService:
                     yolo_start = time.perf_counter()
                     regions_to_process = []
 
+                    # Get object tracker for stationary object check (BUG FIX: must retrieve before use)
+                    object_tracker = proc_data.get("object_tracker")
+
                     # 3a: Add motion regions
                     if motion_regions:
                         # Update last motion timestamp
@@ -722,10 +725,14 @@ class StreamsService:
 
                     # Step 5: Update object tracker with filtered detections (T040-T041)
                     tracking_start = time.perf_counter()
-                    object_tracker = proc_data.get("object_tracker")
                     tracked_objects = []
 
-                    if object_tracker and filtered_detections:
+                    # BUG FIX: Increment frame counter unconditionally (every frame, not just when detections exist)
+                    # This ensures stationary object timing works correctly
+                    proc_data["frame_count"] += 1
+                    current_frame = proc_data["frame_count"]
+
+                    if object_tracker:
                         # Convert Detection objects to (bbox, class_name, confidence) tuples
                         # Note: Detection.bbox is (x1, y1, x2, y2), but tracker expects (x, y, w, h)
                         detection_tuples = []
@@ -734,9 +741,8 @@ class StreamsService:
                             bbox_xywh = (x1, y1, x2 - x1, y2 - y1)  # Convert to (x, y, width, height)
                             detection_tuples.append((bbox_xywh, det.class_name, det.confidence))
 
-                        # Update tracker
-                        proc_data["frame_count"] += 1
-                        current_frame = proc_data["frame_count"]
+                        # BUG FIX: Always update tracker, even with empty detections
+                        # This ensures unmatched tracks are aged properly and eventually deleted
                         tracked_objects = object_tracker.update(detection_tuples, current_frame)
 
                     tracking_time_ms = (time.perf_counter() - tracking_start) * 1000
@@ -890,8 +896,10 @@ class StreamsService:
             logger.info(f"[{stream_id}] MotionDetector initialized")
 
             # Initialize object tracker (T039)
+            # BUG FIX: max_age must be >= detection_interval (50) for stationary objects
+            # Set to 60 to allow stationary objects to survive between detection checks
             object_tracker = ObjectTracker(
-                max_age=30,
+                max_age=60,
                 min_hits=3,
                 iou_threshold=0.3
             )
