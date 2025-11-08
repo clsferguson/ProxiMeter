@@ -155,13 +155,28 @@ class MotionDetector:
         nms_bboxes = self._apply_nms(merged_bboxes)
         logger.debug(f"After NMS: {len(nms_bboxes)} regions (iou_threshold={self.nms_iou_threshold})")
 
-        # Step 8: Limit max regions per frame (Frigate optimization - prevent processing too many regions)
-        MAX_REGIONS = 3  # Process at most 3 regions per frame
-        if len(nms_bboxes) > MAX_REGIONS:
-            # Sort by area (descending) and keep top 3 largest
-            nms_bboxes_sorted = sorted(nms_bboxes, key=lambda b: b[4], reverse=True)  # b[4] is area
-            nms_bboxes = nms_bboxes_sorted[:MAX_REGIONS]
-            logger.debug(f"Limited to {MAX_REGIONS} largest regions (Frigate optimization)")
+        # Step 8: Frigate-style consolidation - merge ALL regions into ONE bounding box
+        # This dramatically reduces YOLO inference time (1 inference instead of N)
+        if len(nms_bboxes) > 1:
+            original_count = len(nms_bboxes)
+
+            # Find bounding box that encompasses ALL motion regions
+            x_min = min(bbox[0] for bbox in nms_bboxes)
+            y_min = min(bbox[1] for bbox in nms_bboxes)
+            x_max = max(bbox[0] + bbox[2] for bbox in nms_bboxes)
+            y_max = max(bbox[1] + bbox[3] for bbox in nms_bboxes)
+
+            # Calculate consolidated box dimensions
+            consolidated_w = x_max - x_min
+            consolidated_h = y_max - y_min
+            total_area = sum(bbox[4] for bbox in nms_bboxes)
+
+            # Replace all regions with single consolidated region
+            nms_bboxes = [(x_min, y_min, consolidated_w, consolidated_h, total_area, original_count)]
+            logger.info(
+                f"Frigate-style consolidation: {original_count} motion regions → 1 box "
+                f"({x_min},{y_min},{consolidated_w},{consolidated_h})"
+            )
 
         # Step 9: Add 15% padding with boundary clipping per FR-004
         motion_regions = []
