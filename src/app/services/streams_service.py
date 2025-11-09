@@ -663,38 +663,19 @@ class StreamsService:
                                     f"for reduced-frequency detection (frame {current_frame})"
                                 )
 
-                    # 3c: Run YOLO on all collected regions
-                    if regions_to_process:
-                        logger.debug(f"[{stream_id}] Processing {len(regions_to_process)} regions (motion + stationary)")
+                    # TEMPORARY: Run YOLO on full frame (region-based detection has coordinate mapping bugs)
+                    # Motion detection still runs for visualization, but YOLO uses full frame
+                    # TODO: Fix coordinate mapping in preprocess_region/map_detections_to_frame
+                    if motion_regions or regions_to_process:
+                        logger.debug(f"[{stream_id}] Motion detected - running full-frame YOLO (region mode disabled)")
 
-                        for region_type, bbox, region_w, region_h in regions_to_process:
-                            # Preprocess region
-                            preprocessed, scale, padding, region_offset = preprocess_region(
-                                frame_bgr,
-                                bbox,
-                                target_size=target_size
-                            )
+                        # Run full-frame YOLO inference
+                        preprocessed, scale, padding = preprocess_frame(frame_bgr, target_size=target_size)
+                        outputs = run_inference(onnx_session, preprocessed)
+                        all_detections = parse_detections(outputs, scale, padding, (height, width))
 
-                            # Inference on region
-                            outputs = run_inference(onnx_session, preprocessed)
-
-                            # Parse detections in region space
-                            region_detections = parse_detections(
-                                outputs, scale, padding,
-                                (region_h, region_w)
-                            )
-
-                            # Map back to full frame coordinates
-                            frame_detections = map_detections_to_frame(
-                                region_detections,
-                                scale, padding, region_offset,
-                                (height, width)
-                            )
-
-                            all_detections.extend(frame_detections)
-
-                    # 3d: No-motion fallback (only if no motion AND no stationary objects to process)
-                    if not regions_to_process:
+                    # 3d: No-motion fallback (only if no motion detected)
+                    if not motion_regions and not regions_to_process:
                         # Step 4: No-motion fallback logic (T016)
                         # Run full-frame detection after 300 seconds (5 min) of no motion
                         current_time = time.time()
