@@ -602,8 +602,8 @@ class StreamsService:
                     all_detections = []
 
                     # FRIGATE-STYLE: Ensure minimum region size for quality detection
-                    # Minimum dimension should be at least 1/3 of model size to avoid excessive upscaling
-                    MIN_REGION_DIM = max(320, target_size // 2)  # At least 320px, or half model size
+                    # Use the model's target size as minimum to avoid any upscaling loss
+                    MIN_REGION_DIM = target_size  # Must match YOLO model input size (320, 416, 640, etc.)
 
                     if motion_regions:
                         # Reset error counter on successful motion detection
@@ -697,6 +697,8 @@ class StreamsService:
                     proc_data["frame_count"] += 1
                     current_frame = proc_data["frame_count"]
 
+                    # Get object tracker from proc_data
+                    object_tracker = proc_data.get("object_tracker")
                     if object_tracker:
                         # Convert Detection objects to (bbox, class_name, confidence) tuples
                         # Note: Detection.bbox is (x1, y1, x2, y2), but tracker expects (x, y, w, h)
