@@ -572,19 +572,121 @@ class StreamsService:
 
                     target_size = yolo_config.image_size
 
-                    # SIMPLIFIED PIPELINE: Just run YOLO every frame
-                    # No motion detection, no complex tracking, no Kalman prediction
-                    yolo_start = time.perf_counter()
+                    # FRIGATE-STYLE MOTION-BASED DETECTION PIPELINE
+                    # Step 1: Extract motion regions (CPU-based, fast)
+                    motion_start = time.perf_counter()
+                    motion_detector = proc_data.get("motion_detector")
+                    motion_lock = proc_data.get("motion_lock")
 
-                    # Run full-frame YOLO inference
-                    preprocessed, scale, padding = preprocess_frame(frame_bgr, target_size=target_size)
-                    outputs = run_inference(onnx_session, preprocessed)
-                    all_detections = parse_detections(outputs, scale, padding, (height, width))
+                    motion_regions = []
+                    if motion_detector and motion_lock:
+                        with motion_lock:
+                            try:
+                                motion_regions = motion_detector.extract_motion_regions(
+                                    frame_bgr,
+                                    timestamp=time.time()
+                                )
+                            except Exception as e:
+                                logger.error(f"[{stream_id}] Motion detection error: {e}", exc_info=True)
+                                proc_data["motion_error_count"] = proc_data.get("motion_error_count", 0) + 1
+
+                                # If too many consecutive errors (3+), disable motion detection
+                                if proc_data["motion_error_count"] >= 3:
+                                    logger.error(f"[{stream_id}] Too many motion detection errors, falling back to full-frame")
+                                    motion_detector = None
+
+                    motion_time_ms = (time.perf_counter() - motion_start) * 1000
+
+                    # Step 2: Run YOLO inference on motion regions
+                    yolo_start = time.perf_counter()
+                    all_detections = []
+
+                    # FRIGATE-STYLE: Ensure minimum region size for quality detection
+                    # Minimum dimension should be at least 1/3 of model size to avoid excessive upscaling
+                    MIN_REGION_DIM = max(320, target_size // 2)  # At least 320px, or half model size
+
+                    if motion_regions:
+                        # Reset error counter on successful motion detection
+                        proc_data["motion_error_count"] = 0
+                        proc_data["last_motion_timestamp"] = time.time()
+
+                        for region in motion_regions:
+                            x, y, w, h = region.bounding_box
+
+                            # FRIGATE OPTIMIZATION: Ensure region is large enough
+                            # If too small, expand to minimum size (centered expansion)
+                            if w < MIN_REGION_DIM or h < MIN_REGION_DIM:
+                                # Calculate how much to expand
+                                expand_w = max(0, MIN_REGION_DIM - w) // 2
+                                expand_h = max(0, MIN_REGION_DIM - h) // 2
+
+                                # Expand region (clip to frame boundaries)
+                                x = max(0, x - expand_w)
+                                y = max(0, y - expand_h)
+                                w = min(width - x, w + 2 * expand_w)
+                                h = min(height - y, h + 2 * expand_h)
+
+                                logger.debug(
+                                    f"[{stream_id}] Expanded small region from "
+                                    f"{region.bounding_box} to ({x},{y},{w},{h}) "
+                                    f"to meet {MIN_REGION_DIM}px minimum"
+                                )
+
+                            # Preprocess region
+                            preprocessed, scale, padding, offset = preprocess_region(
+                                frame_bgr,
+                                (x, y, w, h),
+                                target_size=target_size
+                            )
+
+                            # Run inference on region
+                            outputs = run_inference(onnx_session, preprocessed)
+
+                            # Parse detections in region coordinates
+                            region_detections = parse_detections(outputs, scale, padding, (h, w))
+
+                            # Map back to full frame coordinates
+                            frame_detections = map_detections_to_frame(
+                                region_detections,
+                                scale,
+                                padding,
+                                offset,
+                                (height, width)
+                            )
+
+                            all_detections.extend(frame_detections)
+
+                        logger.debug(
+                            f"[{stream_id}] Motion-based detection: {len(motion_regions)} regions → "
+                            f"{len(all_detections)} detections"
+                        )
+
+                    else:
+                        # No motion detected - check if we should run fallback full-frame detection
+                        last_motion = proc_data.get("last_motion_timestamp")
+                        if last_motion is None or (time.time() - last_motion) > 300:
+                            # No motion for 5 minutes (300 seconds) - run fallback full-frame check
+                            logger.info(f"[{stream_id}] No motion for 300s, running fallback full-frame detection")
+
+                            preprocessed, scale, padding = preprocess_frame(frame_bgr, target_size=target_size)
+                            outputs = run_inference(onnx_session, preprocessed)
+                            all_detections = parse_detections(outputs, scale, padding, (height, width))
+
+                            # Reset timestamp to avoid running every frame
+                            proc_data["last_motion_timestamp"] = time.time()
+                        else:
+                            # Skip detection this frame - no motion and within timeout window
+                            logger.debug(f"[{stream_id}] No motion detected, skipping YOLO inference")
 
                     yolo_time_ms = (time.perf_counter() - yolo_start) * 1000
 
-                    # Filter detections
-                    filtered_detections = filter_detections(all_detections, enabled_labels, min_confidence)
+                    # Filter detections (FRIGATE: 0.8 threshold for person detection)
+                    min_confidence_override = 0.8 if "person" in enabled_labels else min_confidence
+                    filtered_detections = filter_detections(
+                        all_detections,
+                        enabled_labels,
+                        min_confidence_override
+                    )
 
                     # SIMPLIFIED TRACKING: No Kalman, no state machine, just simple IoU matching
                     tracking_start = time.perf_counter()
@@ -613,15 +715,15 @@ class StreamsService:
                     # Report detections and timing metrics
                     if filtered_detections:
                         logger.info(
-                            f"[{stream_id}] Detected {len(filtered_detections)} objects | "
+                            f"[{stream_id}] {len(motion_regions)} motion regions → {len(filtered_detections)} objects detected | "
                             f"Tracked: {len(tracked_objects)} | "
-                            f"YOLO: {yolo_time_ms:.1f}ms, Tracking: {tracking_time_ms:.1f}ms"
+                            f"Motion: {motion_time_ms:.1f}ms, YOLO: {yolo_time_ms:.1f}ms, Tracking: {tracking_time_ms:.1f}ms"
                         )
                     else:
                         logger.debug(
-                            f"[{stream_id}] No objects detected | "
+                            f"[{stream_id}] {len(motion_regions)} motion regions, no objects detected | "
                             f"Tracked: {len(tracked_objects)} | "
-                            f"YOLO: {yolo_time_ms:.1f}ms, Tracking: {tracking_time_ms:.1f}ms"
+                            f"Motion: {motion_time_ms:.1f}ms, YOLO: {yolo_time_ms:.1f}ms, Tracking: {tracking_time_ms:.1f}ms"
                         )
 
                     # Conditional rendering based on viewer presence (B6 optimization, T059-T061)
@@ -631,10 +733,14 @@ class StreamsService:
                         show_motion, show_tracking = self.get_viewer_preferences(stream_id)
 
                         # Render visualization layers based on preferences
-                        # Layer 1: Original YOLO detections (always shown)
+                        # Layer 1: Motion regions (red boxes) - conditional
+                        if show_motion and motion_regions:
+                            render_motion_boxes(frame_bgr, motion_regions)
+
+                        # Layer 2: Original YOLO detections (always shown)
                         render_bounding_boxes(frame_bgr, filtered_detections)
 
-                        # Layer 2: Tracking boxes (green, with IDs) - conditional
+                        # Layer 3: Tracking boxes (green/yellow, with IDs) - conditional
                         if show_tracking and tracked_objects:
                             from ..models.motion import ObjectState
                             visible_tracks = [
@@ -654,8 +760,8 @@ class StreamsService:
                     total_time_ms = (time.perf_counter() - pipeline_start) * 1000
                     logger.debug(
                         f"[{stream_id}] Pipeline: {total_time_ms:.1f}ms total | "
-                        f"YOLO: {yolo_time_ms:.1f}ms, Tracking: {tracking_time_ms:.1f}ms | "
-                        f"{len(filtered_detections)} detections, {len(tracked_objects)} tracked"
+                        f"Motion: {motion_time_ms:.1f}ms, YOLO: {yolo_time_ms:.1f}ms, Tracking: {tracking_time_ms:.1f}ms | "
+                        f"{len(motion_regions)} regions, {len(filtered_detections)} detections, {len(tracked_objects)} tracked"
                     )
 
                     # Record Prometheus metrics
