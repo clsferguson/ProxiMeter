@@ -178,11 +178,12 @@ class MotionDetector:
                 f"({x_min},{y_min},{consolidated_w},{consolidated_h})"
             )
 
-        # Step 9: Add 15% padding with boundary clipping per FR-004
+        # Step 9: Add 50% padding with boundary clipping (increased from 15% for better person coverage)
         motion_regions = []
         for (x, y, w, h, area, merged_count) in nms_bboxes:
-            # Calculate 15% padding based on max dimension per FR-004
-            padding = int(max(w, h) * 0.15)
+            # Calculate 50% padding based on max dimension (was 15%, increased to capture more context)
+            # This helps when only small parts of a person move (e.g., hand waving)
+            padding = int(max(w, h) * 0.50)
 
             # Apply padding and clip to frame boundaries
             x_padded = max(0, x - padding)

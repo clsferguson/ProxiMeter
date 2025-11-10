@@ -597,7 +597,8 @@ class StreamsService:
 
                     motion_time_ms = (time.perf_counter() - motion_start) * 1000
 
-                    # Step 2: Run YOLO inference on motion regions
+                    # Step 2: FRIGATE CRITICAL PATTERN - Combine motion regions with tracked object regions
+                    # This ensures people are tracked even when standing still
                     yolo_start = time.perf_counter()
                     all_detections = []
 
@@ -605,13 +606,110 @@ class StreamsService:
                     # Use the model's target size as minimum to avoid any upscaling loss
                     MIN_REGION_DIM = target_size  # Must match YOLO model input size (320, 416, 640, etc.)
 
-                    if motion_regions:
-                        # Reset error counter on successful motion detection
+                    # Get existing tracked objects to add their regions
+                    object_tracker = proc_data.get("object_tracker")
+                    tracked_regions = []
+                    if object_tracker:
+                        from ..models.motion import ObjectState
+                        # Only track ACTIVE objects every frame (not STATIONARY or TENTATIVE)
+                        active_objects = [obj for obj in object_tracker.tracks if obj.state == ObjectState.ACTIVE]
+
+                        for obj in active_objects:
+                            # Convert tracked bbox (x, y, w, h) to region with padding
+                            x, y, w, h = obj.bounding_box
+                            # Add 20% padding around tracked object
+                            padding = int(max(w, h) * 0.20)
+                            x_padded = max(0, x - padding)
+                            y_padded = max(0, y - padding)
+                            w_padded = min(width - x_padded, w + 2 * padding)
+                            h_padded = min(height - y_padded, h + 2 * padding)
+
+                            tracked_regions.append({
+                                'bbox': (x_padded, y_padded, w_padded, h_padded),
+                                'source': 'tracking',
+                                'object_id': obj.id
+                            })
+
+                    # Combine motion regions and tracked regions
+                    detection_regions = []
+
+                    # Add motion regions
+                    for region in motion_regions:
+                        detection_regions.append({
+                            'bbox': region.bounding_box,
+                            'source': 'motion'
+                        })
+
+                    # Add tracked regions (these keep people visible when motion stops)
+                    detection_regions.extend(tracked_regions)
+
+                    # Deduplicate overlapping regions to prevent redundant YOLO inference
+                    # This prevents slowdown when tracked regions overlap with motion regions
+                    if len(detection_regions) > 1:
+                        from ..services.detection import calculate_iou
+                        deduplicated = []
+                        used = [False] * len(detection_regions)
+
+                        for i in range(len(detection_regions)):
+                            if used[i]:
+                                continue
+
+                            current_region = detection_regions[i]
+                            x1, y1, w1, h1 = current_region['bbox']
+                            bbox1 = (x1, y1, x1 + w1, y1 + h1)
+
+                            # Check for overlaps with remaining regions
+                            merged = False
+                            for j in range(i + 1, len(detection_regions)):
+                                if used[j]:
+                                    continue
+
+                                other_region = detection_regions[j]
+                                x2, y2, w2, h2 = other_region['bbox']
+                                bbox2 = (x2, y2, x2 + w2, y2 + h2)
+
+                                # If IoU > 0.3, regions overlap significantly - merge them
+                                iou = calculate_iou(bbox1, bbox2)
+                                if iou > 0.3:
+                                    # Merge bboxes: take union
+                                    x_min = min(x1, x2)
+                                    y_min = min(y1, y2)
+                                    x_max = max(x1 + w1, x2 + w2)
+                                    y_max = max(y1 + h1, y2 + h2)
+
+                                    # Update current region to merged bbox
+                                    current_region['bbox'] = (x_min, y_min, x_max - x_min, y_max - y_min)
+                                    current_region['source'] = 'merged'
+                                    x1, y1, w1, h1 = current_region['bbox']
+                                    bbox1 = (x1, y1, x1 + w1, y1 + h1)
+
+                                    used[j] = True
+                                    merged = True
+
+                            deduplicated.append(current_region)
+                            used[i] = True
+
+                        original_count = len(detection_regions)
+                        detection_regions = deduplicated
+
+                        if original_count != len(detection_regions):
+                            logger.info(
+                                f"[{stream_id}] Merged overlapping regions: "
+                                f"{original_count} → {len(detection_regions)} (prevents redundant inference)"
+                            )
+
+                    logger.debug(
+                        f"[{stream_id}] Detection regions: {len(motion_regions)} motion + "
+                        f"{len(tracked_regions)} tracked = {len(detection_regions)} total (after deduplication)"
+                    )
+
+                    if detection_regions:
+                        # Reset error counter on successful detection
                         proc_data["motion_error_count"] = 0
                         proc_data["last_motion_timestamp"] = time.time()
 
-                        for region in motion_regions:
-                            x, y, w, h = region.bounding_box
+                        for region_data in detection_regions:
+                            x, y, w, h = region_data['bbox']
 
                             # FRIGATE OPTIMIZATION: Ensure region is large enough
                             # If too small, expand to minimum size (centered expansion)
@@ -627,8 +725,8 @@ class StreamsService:
                                 h = min(height - y, h + 2 * expand_h)
 
                                 logger.debug(
-                                    f"[{stream_id}] Expanded small region from "
-                                    f"{region.bounding_box} to ({x},{y},{w},{h}) "
+                                    f"[{stream_id}] Expanded small {region_data['source']} region from "
+                                    f"{region_data['bbox']} to ({x},{y},{w},{h}) "
                                     f"to meet {MIN_REGION_DIM}px minimum"
                                 )
 
@@ -657,7 +755,8 @@ class StreamsService:
                             all_detections.extend(frame_detections)
 
                         logger.debug(
-                            f"[{stream_id}] Motion-based detection: {len(motion_regions)} regions → "
+                            f"[{stream_id}] Region-based detection: {len(detection_regions)} regions "
+                            f"({len(motion_regions)} motion + {len(tracked_regions)} tracked) → "
                             f"{len(all_detections)} detections"
                         )
 
